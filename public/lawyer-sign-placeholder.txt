@@ -1,0 +1,1 @@
+Place lawyer-sign.png here (signature image for reviewed documents). The app will overlay it on the document preview when status is 'reviewed'.

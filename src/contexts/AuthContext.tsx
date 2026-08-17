@@ -31,12 +31,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // Timeout guard: if the backend doesn't respond within 8s, clear the
+    // stale token and continue as unauthenticated instead of hanging forever.
+    const timeoutId = setTimeout(() => {
+      console.warn('Auth check timed out – clearing stale token');
+      setAuthToken(null);
+      setUser(null);
+      setProfile(null);
+      setLoading(false);
+    }, 8000);
+
     apiMe()
       .then((data) => {
+        clearTimeout(timeoutId);
         setUser(data.user);
         setProfile(data.profile);
       })
       .catch(() => {
+        clearTimeout(timeoutId);
         setAuthToken(null);
         setUser(null);
         setProfile(null);

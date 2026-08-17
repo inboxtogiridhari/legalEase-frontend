@@ -27,14 +27,14 @@ export default function DocumentReview({ document, onClose }: DocumentReviewProp
     'recipientName' in document.form_data
       ? document.form_data.recipientName
       : 'tenantName' in document.form_data
-      ? document.form_data.tenantName
-      : 'Recipient';
+        ? document.form_data.tenantName
+        : 'Recipient';
   const recipientAddress =
     'recipientAddress' in document.form_data
       ? document.form_data.recipientAddress
       : 'propertyAddress' in document.form_data
-      ? document.form_data.propertyAddress
-      : 'Address not provided';
+        ? document.form_data.propertyAddress
+        : 'Address not provided';
 
   async function handleSave() {
     setLoading(true);
@@ -144,7 +144,7 @@ export default function DocumentReview({ document, onClose }: DocumentReviewProp
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
+      <div className="flex flex-col gap-6">
         <div className="bg-white rounded-xl shadow-md border border-slate-200">
           <div className="bg-slate-900 px-6 py-4 border-b border-slate-700">
             <h3 className="font-semibold text-white">Client Snapshot</h3>

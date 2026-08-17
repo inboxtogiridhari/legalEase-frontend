@@ -323,12 +323,12 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
               </p>
             </div>
           )}
-          {document.reviewed_by_name && (
-            <div>
-              <p className="text-slate-600 mb-1">Reviewed By</p>
-              <p className="text-slate-900 font-medium">{document.reviewed_by_name}</p>
-            </div>
-          )}
+          <div>
+            <p className="text-slate-600 mb-1">Assigned Lawyer / Reviewer</p>
+            <p className="text-slate-900 font-medium">
+              {document.reviewed_by_name || (['lawyer_review', 'pending_review', 'drafting'].includes(document.status) ? 'Awaiting lawyer assignment' : 'Not assigned')}
+            </p>
+          </div>
         </div>
       </div>
     </div>

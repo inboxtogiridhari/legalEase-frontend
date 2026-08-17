@@ -16,8 +16,10 @@ import { Document } from '../../types';
 import DashboardLayout from '../Layout/DashboardLayout';
 import DocumentForm from '../DocumentForm/DocumentForm';
 import DocumentPreview from '../DocumentPreview/DocumentPreview';
+import { DocumentViewPage } from '../DocumentView/DocumentViewPage';
 import ProfilePage from '../Profile/ProfilePage';
 import { useToast } from '../Toast/ToastProvider';
+import { mapDocumentStatus, getNextAction, calculateDashboardCounts } from '../../utils/documentLifecycle';
 
 const TIMELINE_STEPS = ['drafting', 'lawyer_review', 'verified', 'signed', 'sent_soft_copy', 'out_for_delivery', 'delivered'];
 
@@ -38,21 +40,34 @@ interface ClientDashboardProps {
 
 export default function ClientDashboard({ serviceRoute = null }: ClientDashboardProps) {
   const currentPath = window.location.pathname;
-  const { user } = useAuth();
-  const { showToast } = useToast();
+  const { user, profile } = useAuth();
+  const { showToast, notifications } = useToast();
   const { t, i18n } = useTranslation();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(currentPath === '/notice-form');
+  const isCreationPath = Boolean(serviceRoute) || [
+    '/notice-form', '/rent-form', '/affidavit-form',
+    '/dashboard/legal-notice', '/dashboard/legal-notices',
+    '/dashboard/rent-agreement', '/dashboard/rent-agreements',
+    '/dashboard/affidavit', '/dashboard/affidavits'
+  ].includes(currentPath);
+  const [showForm, setShowForm] = useState(isCreationPath);
   const [showProfile, setShowProfile] = useState(false);
   const [search, setSearch] = useState('');
   const [voiceQuestion, setVoiceQuestion] = useState('');
   const [voiceReply, setVoiceReply] = useState('');
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [selectedType, setSelectedType] = useState<'legal_notice' | 'rent_agreement' | 'affidavit'>(
-    currentPath === '/notice-form' ? 'legal_notice' : 'legal_notice'
+    serviceRoute ||
+    (currentPath.includes('rent') ? 'rent_agreement' : currentPath.includes('affidavit') ? 'affidavit' : 'legal_notice')
   );
   const [selectedNoticeSubtype, setSelectedNoticeSubtype] = useState<string>('');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'legal_notice' | 'rent_agreement' | 'affidavit'>(
+    serviceRoute || 'all'
+  );
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'updated'>('newest');
+  const [activeDraftId, setActiveDraftId] = useState<string | undefined>(undefined);
   const [skipDraftSession, setSkipDraftSession] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
   const [heroIndex, setHeroIndex] = useState(0);
@@ -61,6 +76,14 @@ export default function ClientDashboard({ serviceRoute = null }: ClientDashboard
   const [speakingDocId, setSpeakingDocId] = useState<string | null>(null);
   const [queryReplies, setQueryReplies] = useState<Record<string, string>>({});
   const [replyingDocId, setReplyingDocId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (serviceRoute) {
+      setSelectedType(serviceRoute);
+      setShowForm(true);
+    }
+  }, [serviceRoute]);
+
   const serviceTitle = serviceRoute === 'legal_notice'
     ? 'Drafting: Legal Notice'
     : serviceRoute === 'rent_agreement'
@@ -101,8 +124,25 @@ export default function ClientDashboard({ serviceRoute = null }: ClientDashboard
   async function loadDocuments(q?: string) {
     try {
       if (user?.id) {
-        const data = await apiDocumentsList(q) as Document[];
+        const data = (await apiDocumentsList(q)) as Document[];
         setDocuments(data || []);
+
+        // Route deep-linking support for /documents/:id, /documents/:id/edit, /documents/:id/preview, /documents/:id/tracking
+        const docMatch = currentPath.match(/^\/documents\/([a-zA-Z0-9-]+)(\/(edit|preview|tracking))?$/);
+        if (docMatch && data && data.length > 0) {
+          const targetId = docMatch[1];
+          const action = docMatch[3];
+          const found = data.find((d) => d.id === targetId);
+          if (found) {
+            if (action === 'edit' && (found.is_session_draft || ['draft', 'drafting'].includes(found.status))) {
+              setSelectedType(found.document_type);
+              if (found.notice_subtype) setSelectedNoticeSubtype(found.notice_subtype);
+              setShowForm(true);
+            } else {
+              setPreviewDocument(found);
+            }
+          }
+        }
       }
     } catch (error) {
       console.error('Error loading documents:', error);
@@ -116,15 +156,39 @@ export default function ClientDashboard({ serviceRoute = null }: ClientDashboard
     if (subtype) {
       setSelectedNoticeSubtype(subtype);
       window.localStorage.setItem('preferred_notice_type', subtype);
+    } else {
+      setSelectedNoticeSubtype('');
     }
+    setActiveDraftId(undefined);
     setSkipDraftSession(true);
     setShowForm(true);
+    const targetRoute = type === 'rent_agreement' ? '/dashboard/rent-agreements' : type === 'affidavit' ? '/dashboard/affidavits' : '/dashboard/legal-notices';
+    if (window.location.pathname !== targetRoute) {
+      window.history.pushState({}, '', targetRoute);
+    }
   }
 
   function handleFormClose() {
     setShowForm(false);
     setSkipDraftSession(false);
+    setActiveDraftId(undefined);
+    if (window.location.pathname !== '/dashboard') {
+      window.history.pushState({}, '', '/dashboard');
+    }
     loadDocuments(search);
+  }
+
+  async function handleDeleteDocument(id: string) {
+    if (!window.confirm('Are you sure you want to delete this draft? This action cannot be undone.')) {
+      return;
+    }
+    try {
+      await apiDocumentDelete(id);
+      showToast('Draft deleted successfully', 'success');
+      loadDocuments(search);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to delete draft', 'error');
+    }
   }
 
   async function runTransition(doc: Document, stage: 'sent_soft_copy' | 'out_for_delivery') {
@@ -299,11 +363,19 @@ export default function ClientDashboard({ serviceRoute = null }: ClientDashboard
     return (
       <DashboardLayout onProfileClick={() => setShowProfile(true)}>
         <DocumentForm
-            documentType={selectedType}
-            preselectedNoticeSubtype={selectedNoticeSubtype}
-            skipDraftSession={skipDraftSession}
-            onClose={handleFormClose}
-          />
+          documentType={selectedType}
+          preselectedNoticeSubtype={selectedNoticeSubtype}
+          skipDraftSession={skipDraftSession}
+          initialDraftId={activeDraftId}
+          onClose={handleFormClose}
+          onSuccess={() => {
+            setSearch('');
+            setTypeFilter('all');
+            setStatusFilter('all');
+            setSortOrder('newest');
+            loadDocuments('');
+          }}
+        />
       </DashboardLayout>
     );
   }
@@ -311,355 +383,520 @@ export default function ClientDashboard({ serviceRoute = null }: ClientDashboard
   if (previewDocument) {
     return (
       <DashboardLayout onProfileClick={() => setShowProfile(true)}>
-        <DocumentPreview
+        <DocumentViewPage
           document={previewDocument}
           onClose={() => setPreviewDocument(null)}
+          onContinueEditing={(doc) => {
+            setPreviewDocument(null);
+            setSelectedType(doc.document_type);
+            if (doc.notice_subtype) setSelectedNoticeSubtype(doc.notice_subtype);
+            setActiveDraftId(doc.id);
+            setSkipDraftSession(false);
+            setShowForm(true);
+          }}
+          onReload={() => loadDocuments(search)}
         />
       </DashboardLayout>
     );
   }
 
-  const vaultDocs = documents.filter((d) => ['signed', 'delivered'].includes(d.status));
-  const filteredDocuments = serviceRoute ? documents.filter((d) => d.document_type === serviceRoute) : [];
-  const compliance = complianceScore();
-  const circumference = 2 * Math.PI * 52;
-  const offset = circumference - (compliance / 100) * circumference;
+  const vaultDocs = documents.filter((d) =>
+    ['signed', 'delivered'].includes(d.status)
+  );
+
+  const filteredDocuments = documents.filter((doc) => {
+    // Type filter
+    const matchesType =
+      typeFilter === 'all' ||
+      doc.document_type === typeFilter;
+
+    // Status filter
+    const matchesStatus =
+      statusFilter === 'all' ||
+      doc.status === statusFilter;
+
+    // Search filter
+    const searchTerm = search.trim().toLowerCase();
+
+    const matchesSearch =
+      !searchTerm ||
+      typeLabel(doc.document_type).toLowerCase().includes(searchTerm) ||
+      doc.document_type.toLowerCase().includes(searchTerm) ||
+      doc.status?.toLowerCase().includes(searchTerm);
+
+    return matchesType && matchesStatus && matchesSearch;
+  });
+
+  const dashboardCounts = calculateDashboardCounts(documents);
+
+  const statusSummary = [
+    { label: 'Drafts', count: dashboardCounts.drafts },
+    { label: 'Awaiting Lawyer', count: dashboardCounts.awaitingLawyer },
+    { label: 'Under Review', count: dashboardCounts.underReview },
+    { label: 'Changes Requested', count: dashboardCounts.changesRequested },
+    { label: 'Verified', count: dashboardCounts.verified },
+    { label: 'Completed', count: dashboardCounts.completed },
+  ];
+
+  const docsToShow = [...filteredDocuments].sort((a, b) => {
+    if (sortOrder === 'oldest') {
+      return (
+        new Date(a.created_at).getTime() -
+        new Date(b.created_at).getTime()
+      );
+    }
+
+    if (sortOrder === 'updated') {
+      return (
+        new Date(b.updated_at || b.created_at).getTime() -
+        new Date(a.updated_at || a.created_at).getTime()
+      );
+    }
+
+    // newest
+    return (
+      new Date(b.created_at).getTime() -
+      new Date(a.created_at).getTime()
+    );
+  });
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Welcome back';
+
+  function typeLabel(type: Document['document_type']) {
+    return type === 'legal_notice' ? 'Legal Notice' : type === 'rent_agreement' ? 'Rent Agreement' : 'Affidavit';
+  }
+
+  function statusDisplay(status: string) {
+    if (['draft', 'drafting'].includes(status)) return 'Draft';
+    if (['pending_review', 'lawyer_review'].includes(status)) return 'Awaiting Lawyer';
+    if (status === 'reviewed') return 'Under Review';
+    if (['verified', 'signed', 'payment'].includes(status)) return 'Verified';
+    if (['sent_soft_copy', 'out_for_delivery', 'delivered', 'completed'].includes(status)) return 'Completed';
+    return status.replace(/_/g, ' ');
+  }
+
+  function lawyerStatus(doc: Document) {
+    if (doc.reviewed_by_profile?.full_name) return `Reviewed by ${doc.reviewed_by_profile.full_name}`;
+    if (doc.reviewed_by_name) return `Reviewed by ${doc.reviewed_by_name}`;
+    if (['pending_review', 'lawyer_review'].includes(doc.status)) return 'Awaiting lawyer assignment';
+    return 'Not assigned yet';
+  }
+
+  const recentNotifications = notifications.slice(0, 5);
 
   return (
     <DashboardLayout onProfileClick={() => setShowProfile(true)}>
       <div className="space-y-8">
-        <div className="grid lg:grid-cols-[2fr,1fr] gap-6">
-          <div className="bg-gradient-to-r from-[var(--court-midnight)] via-[var(--court-charcoal)] to-[var(--court-midnight)] rounded-2xl p-6 text-white shadow-lg">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-300">{t('dashboard.clientTitle')}</p>
-            <h2 className="text-4xl font-bold font-law mt-2">{heroSlides[heroIndex]}</h2>
-            <p className="text-slate-300 mt-2">{t('dashboard.activeSubtitle')}</p>
-            <div className="mt-3 flex items-center gap-2">
-              {heroSlides.map((_, idx) => (
-                <span key={idx} className={`h-1.5 rounded-full transition-all ${heroIndex === idx ? 'w-8 bg-[var(--court-gold)]' : 'w-3 bg-white/40'}`} />
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Legal Compliance Meter</p>
-            <div className="mt-4 flex items-center gap-6">
-              <div className="compliance-ring">
-                <svg width="140" height="140">
-                  <circle cx="70" cy="70" r="52" stroke="#e5e7eb" strokeWidth="10" fill="none" />
-                  <circle cx="70" cy="70" r="52" stroke="#d4af37" strokeWidth="10" fill="none" strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" />
-                </svg>
-                <div className="label">{compliance}%</div>
-              </div>
+        <section className="grid gap-6 xl:grid-cols-[1.6fr,1fr]">
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+            <small className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Client command center</small>
+            <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <p className="text-sm text-slate-600">Active cases aligned with compliance milestones.</p>
-                <p className="text-xs text-slate-500 mt-2">Auto-calculated from verified, signed, and delivery stages.</p>
+                <p className="text-sm text-slate-500">{greeting}, {profile?.full_name?.split(' ')[0] || 'there'}</p>
+                <h1 className="mt-2 text-4xl font-semibold tracking-tight text-slate-900">Your legal workspace</h1>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">Create, track and manage your legal documents with a secure, advocate-backed workflow.</p>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h3 className="text-3xl font-bold text-slate-900 font-law">{serviceTitle || t('dashboard.activeCases')}</h3>
-            <p className="text-slate-600">{serviceTitle ? 'Dedicated paper-first workspace for this service.' : t('dashboard.activeSubtitle')}</p>
-          </div>
-          <div className="flex gap-2 w-full md:w-auto">
-            <div className="relative w-full md:w-96">
-              <FileSearch className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={t('dashboard.searchPlaceholder')}
-                className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-            <div className="relative">
-              <Languages className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
-              <select
-                value={i18n.language}
-                onChange={(e) => {
-                  const lang = e.target.value;
-                  i18n.changeLanguage(lang);
-                  window.localStorage.setItem('legalease_lang', lang);
-                }}
-                className="pl-9 pr-3 py-2.5 border border-slate-300 rounded-lg bg-white"
-              >
-                <option value="en">English</option>
-                <option value="hi">Hindi</option>
-                <option value="hinglish">Hinglish</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          <button onClick={() => { window.location.pathname = '/dashboard'; }} className={`rounded-full px-4 py-2 text-sm font-semibold ${!serviceRoute ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Overview</button>
-          <button onClick={() => { window.location.pathname = '/dashboard/legal-notices'; }} className={`rounded-full px-4 py-2 text-sm font-semibold ${serviceRoute === 'legal_notice' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Legal Notices</button>
-          <button onClick={() => { window.location.pathname = '/dashboard/rent-agreements'; }} className={`rounded-full px-4 py-2 text-sm font-semibold ${serviceRoute === 'rent_agreement' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Rent Agreements</button>
-          <button onClick={() => { window.location.pathname = '/dashboard/affidavits'; }} className={`rounded-full px-4 py-2 text-sm font-semibold ${serviceRoute === 'affidavit' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Affidavits</button>
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-2">
-            <Mic className="w-4 h-4 text-slate-700" />
-            <p className="font-semibold text-slate-900">{t('dashboard.interactiveBar')}</p>
-            {voiceLoading && (
-              <span className="voice-wave ml-2" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <input
-              value={voiceQuestion}
-              onChange={(e) => setVoiceQuestion(e.target.value)}
-              placeholder={t('dashboard.askPlaceholder')}
-              className="flex-1 px-3 py-2 border rounded-lg"
-            />
-            <button onClick={askVoiceFaq} className="px-4 py-2 bg-slate-900 text-white rounded-lg">{t('dashboard.askButton')}</button>
-          </div>
-          {voiceReply && <p className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">{voiceReply}</p>}
-        </div>
-
-        <div className="grid md:grid-cols-3 gap-6">
-          <button onClick={() => handleCreateNew('legal_notice', window.localStorage.getItem('preferred_notice_type') || 'money_recovery')} className="bg-white p-6 rounded-xl shadow-md hover:shadow-xl transition-all border-l-4 border-l-sky-700 border-y border-r border-slate-200 text-left group">
-            <div className="bg-slate-900 w-12 h-12 rounded-lg flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><FileText className="w-6 h-6 text-white" /></div>
-            <h3 className="text-2xl font-semibold text-slate-900 mb-2 font-law">{t('dashboard.createLegalNotice')}</h3>
-            <p className="text-slate-600 text-sm">AI-assisted notice draft with lawyer verification workflow</p>
-          </button>
-          <button onClick={() => handleCreateNew('rent_agreement')} className="bg-white p-6 rounded-xl shadow-md hover:shadow-xl transition-all border-l-4 border-l-[var(--court-gold)] border-y border-r border-slate-200 text-left group">
-            <div className="bg-slate-900 w-12 h-12 rounded-lg flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><FileText className="w-6 h-6 text-white" /></div>
-            <h3 className="text-2xl font-semibold text-slate-900 mb-2 font-law">{t('dashboard.createRentAgreement')}</h3>
-            <p className="text-slate-600 text-sm">State-aware clauses and print-ready witness blocks</p>
-          </button>
-          <button onClick={() => handleCreateNew('affidavit')} className="bg-white p-6 rounded-xl shadow-md hover:shadow-xl transition-all border-l-4 border-l-slate-700 border-y border-r border-slate-200 text-left group">
-            <div className="bg-white p-1 rounded-lg inline-flex mb-4 border border-slate-200"><Plus className="w-5 h-5 text-slate-700" /></div>
-            <h3 className="text-2xl font-semibold text-slate-900 mb-2 font-law">{t('dashboard.createAffidavit')}</h3>
-            <p className="text-slate-600 text-sm">Guided affidavit builder with timeline tracking</p>
-          </button>
-        </div>
-
-        <div className="bg-white rounded-xl border p-5">
-          <h3 className="text-2xl font-semibold text-slate-900 mb-3 font-law">{t('dashboard.chooseNotice')}</h3>
-          <div className="grid md:grid-cols-3 gap-3">
-            {[
-              ['money_recovery', 'Money Recovery'],
-              ['cheque_bounce', 'Cheque Bounce'],
-              ['tenant_eviction', 'Tenant Eviction'],
-              ['divorce_family', 'Divorce / Family'],
-              ['employment_dispute', 'Employment Dispute'],
-            ].map(([id, label]) => (
               <button
-                key={id}
-                onClick={() => handleCreateNew('legal_notice', id)}
-                className="text-left px-4 py-3 rounded-lg border hover:border-slate-900 hover:bg-slate-50"
+                onClick={() => handleCreateNew('legal_notice')}
+                className="inline-flex items-center justify-center rounded-2xl bg-[var(--court-gold)] px-5 py-3 text-sm font-semibold text-slate-900 shadow-card transition hover:bg-[var(--court-gold)]/95"
               >
-                <p className="font-medium text-slate-900">{label}</p>
-                <p className="text-xs text-slate-500">Start this notice</p>
+                Create Document
               </button>
-            ))}
-          </div>
-        </div>
-
-        {!serviceRoute && (
-          <section className="grid md:grid-cols-3 gap-6">
-            <button onClick={() => { window.location.pathname = '/dashboard/legal-notices'; }} className="rounded-2xl border border-slate-200 bg-white p-6 text-left shadow-sm hover:shadow-md">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Dedicated Page</p>
-              <h4 className="mt-2 text-2xl font-law font-semibold text-slate-900">Legal Notices</h4>
-              <p className="mt-2 text-sm text-slate-600">Separate listing, drafting header, and paper preview workflow for notices.</p>
-            </button>
-            <button onClick={() => { window.location.pathname = '/dashboard/rent-agreements'; }} className="rounded-2xl border border-slate-200 bg-white p-6 text-left shadow-sm hover:shadow-md">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Dedicated Page</p>
-              <h4 className="mt-2 text-2xl font-law font-semibold text-slate-900">Rent Agreements</h4>
-              <p className="mt-2 text-sm text-slate-600">Clause-first workflow for licensor/licensee agreements and expiry reminders.</p>
-            </button>
-            <button onClick={() => { window.location.pathname = '/dashboard/affidavits'; }} className="rounded-2xl border border-slate-200 bg-white p-6 text-left shadow-sm hover:shadow-md">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Dedicated Page</p>
-              <h4 className="mt-2 text-2xl font-law font-semibold text-slate-900">Affidavits</h4>
-              <p className="mt-2 text-sm text-slate-600">Separate affidavit drafting space with notary-ready preview.</p>
-            </button>
-          </section>
-        )}
-
-        {serviceRoute && (
-        <div>
-          {loading ? (
-            <div className="text-center py-12"><div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-300 border-t-slate-900" /></div>
-          ) : filteredDocuments.length === 0 ? (
-            <div className="bg-white rounded-xl p-12 text-center border-2 border-dashed border-slate-300">
-              <Plus className="w-12 h-12 text-slate-400 mx-auto mb-4" />
-              <p className="text-slate-600">No documents in this service yet.</p>
             </div>
-          ) : (
-            <div className="grid gap-4">
-              {filteredDocuments.map((doc) => {
-                const timeline = timelineFor(doc);
-                const queryThread = latestQueryThread(doc);
-                const canSendSoftCopy = doc.status === 'signed' || doc.status === 'payment' || doc.payment_status === 'paid';
-                const canDispatchHardCopy = doc.status === 'sent_soft_copy';
-                const canEsign = doc.status === 'verified' || doc.status === 'reviewed';
-                const hasGoldBadge = (doc.reviewed_by_profile?.years_experience || 0) >= 8;
-
-                return (
-                  <div key={doc.id} className={`bg-white rounded-xl p-6 shadow-md hover:shadow-lg transition-shadow border border-slate-200 border-l-4 ${statusAccent(doc.status)}`}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <FileText className="w-5 h-5 text-slate-700" />
-                          <h4 className="font-semibold text-slate-900 capitalize">{doc.document_type.replace('_', ' ')}</h4>
-                          <span className="px-2 py-1 text-xs rounded-full bg-slate-100 text-slate-700">{doc.status.replace(/_/g, ' ')}</span>
-                        </div>
-                        <p className="text-sm text-slate-600 mb-3">Created on {new Date(doc.created_at).toLocaleDateString()}</p>
-
-                        {doc.reviewed_by_profile && (
-                          <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                            <div className="flex items-center justify-between gap-3">
-                              <div>
-                                <p className="text-sm font-semibold text-blue-900">Lawyer Consultation Hub</p>
-                                <p className="text-xs text-blue-800">{doc.reviewed_by_profile.full_name} | Bar ID: {doc.reviewed_by_profile.bar_council_id || 'N/A'} | {doc.reviewed_by_profile.years_experience || 0} yrs</p>
-                              </div>
-                              {hasGoldBadge && (
-                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-amber-100 text-amber-800 border border-amber-300">
-                                  <BadgeCheck className="w-3 h-3" /> Gold Badge
-                                </span>
-                              )}
-                            </div>
-                            <button onClick={() => setConsultDoc(doc)} className="mt-2 px-3 py-1.5 text-xs bg-blue-700 text-white rounded-lg inline-flex items-center gap-1"><PhoneCall className="w-3 h-3" />Book Consultation</button>
-                          </div>
-                        )}
-
-                        <div className="grid md:grid-cols-7 gap-2 mb-2">
-                          {timeline.map((tItem) => (
-                            <div key={tItem.step} className={`text-[11px] rounded px-2 py-1 border ${tItem.done ? 'bg-green-50 border-green-200 text-green-800' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
-                              {tItem.step.replace(/_/g, ' ')}
-                            </div>
-                          ))}
-                        </div>
-
-                        {queryThread.latestQuery && (
-                          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-800">Lawyer Query</p>
-                            <p className="mt-2 text-sm text-amber-950">
-                              {String(queryThread.latestQuery.metadata?.message || 'No query message available.')}
-                            </p>
-                            <p className="mt-1 text-[11px] text-amber-700">
-                              Asked on {new Date(queryThread.latestQuery.at).toLocaleString()}
-                            </p>
-
-                            {queryThread.latestReply && (
-                              <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-800">Your Last Reply</p>
-                                <p className="mt-2 text-sm text-emerald-950">
-                                  {String(queryThread.latestReply.metadata?.message || 'No reply message available.')}
-                                </p>
-                              </div>
-                            )}
-
-                            {queryThread.hasPendingReply && (
-                              <div className="mt-3 space-y-2">
-                                <textarea
-                                  value={queryReplies[doc.id] || ''}
-                                  onChange={(event) => setQueryReplies((prev) => ({ ...prev, [doc.id]: event.target.value }))}
-                                  rows={3}
-                                  placeholder="Reply to the lawyer here..."
-                                  className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm"
-                                />
-                                <button
-                                  onClick={() => sendQueryReply(doc)}
-                                  disabled={replyingDocId === doc.id}
-                                  className="rounded-lg bg-amber-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
-                                >
-                                  {replyingDocId === doc.id ? 'Sending reply...' : 'Send Reply'}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {(doc.status === 'out_for_delivery' || doc.status === 'delivered') && (
-                          <div className="mt-3 p-3 rounded-lg border bg-slate-50">
-                            <p className="text-xs font-semibold text-slate-700 mb-2 inline-flex items-center gap-1"><MapPinned className="w-3.5 h-3.5" /> Case Tracking Map</p>
-                            <div className="grid grid-cols-3 text-[11px] text-slate-600">
-                              <p className="text-center">Lawyer Office</p>
-                              <p className="text-center">Transit Hub</p>
-                              <p className="text-center">Recipient City</p>
-                            </div>
-                            <div className="mt-2 h-1 bg-slate-200 rounded-full overflow-hidden">
-                              <div className={`h-full bg-emerald-500 ${doc.status === 'delivered' ? 'w-full' : 'w-2/3'}`} />
-                            </div>
-                          </div>
-                        )}
-
-                        {renderNotificationBanner(doc)}
-                      </div>
-
-                      <div className="flex flex-col gap-2">
-                        <button onClick={() => setPreviewDocument(doc)} className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors">
-                          <Eye className="w-4 h-4" />{t('dashboard.quickAction')}
-                        </button>
-                        <button
-                          onClick={async () => {
-                            if (!window.confirm('Delete this document?')) return;
-                            try {
-                              await apiDocumentDelete(doc.id);
-                              showToast('Document deleted', 'success');
-                              await loadDocuments(search);
-                            } catch (error) {
-                              showToast(error instanceof Error ? error.message : t('errors.deleteFailed'), 'error');
-                            }
-                          }}
-                          className="flex items-center gap-2 px-4 py-2 bg-rose-50 text-rose-700 rounded-lg hover:bg-rose-100 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />{t('dashboard.delete')}
-                        </button>
-                        {canEsign && (
-                          <button onClick={() => runEsign(doc)} className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors">
-                            <PenLine className="w-4 h-4" />{t('dashboard.requestEsign')}
-                          </button>
-                        )}
-                        {canSendSoftCopy && (
-                          <button onClick={() => runTransition(doc, 'sent_soft_copy')} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
-                            <Send className="w-4 h-4" />{t('dashboard.sendSoftCopy')}
-                          </button>
-                        )}
-                        {canDispatchHardCopy && (
-                          <button onClick={() => runTransition(doc, 'out_for_delivery')} className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors">
-                            <Truck className="w-4 h-4" />{t('dashboard.dispatchHardCopy')}
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleVoiceStatus(doc)}
-                          className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
-                        >
-                          <Mic className="w-4 h-4" />{speakingDocId === doc.id ? t('voice.speaking') : t('dashboard.voiceStatus')}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-        )}
-
-        <div className="bg-white border rounded-xl p-5">
-          <h3 className="text-2xl font-law font-semibold text-slate-900 mb-3">{t('dashboard.vaultTitle')}</h3>
-          {vaultDocs.length === 0 ? (
-            <p className="text-sm text-slate-600">{t('dashboard.noVault')}</p>
-          ) : (
-            <div className="grid md:grid-cols-2 gap-3">
-              {vaultDocs.map((doc) => (
-                <div key={`vault-${doc.id}`} className="border rounded-lg p-3 bg-slate-50">
-                  <p className="font-medium text-slate-900 capitalize">{doc.document_type.replace('_', ' ')} #{doc.id.slice(0, 8)}</p>
-                  <p className="text-xs text-slate-600">{expiryText(doc)}</p>
+            <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {statusSummary.map((stat) => (
+                <div key={stat.label} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                  <p className="text-sm font-medium text-slate-500">{stat.label}</p>
+                  <p className="mt-3 text-3xl font-semibold text-slate-900">{stat.count}</p>
                 </div>
               ))}
             </div>
-          )}
-        </div>
+          </div>
+
+          <div className="grid gap-6">
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Document Overview</p>
+                  <h2 className="mt-2 text-2xl font-semibold text-slate-900">{serviceRoute ? typeLabel(serviceRoute) : 'All documents'}</h2>
+                </div>
+                <span className="rounded-2xl bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{docsToShow.length} items</span>
+              </div>
+              <div className="mt-6 space-y-4">
+                <div className="rounded-3xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+                  The dashboard reflects live case progress from your documents. Use the quick cards below to start a new premium draft or continue an active case.
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                    <p className="text-sm font-semibold text-slate-900">Verified workflows</p>
+                    <p className="mt-2 text-sm text-slate-600">Every notice, agreement and affidavit includes lawyer review and legal quality checks.</p>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                    <p className="text-sm font-semibold text-slate-900">Activity feed</p>
+                    <p className="mt-2 text-sm text-slate-600">Latest notifications and document milestones are shown in the activity panel.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Activity</p>
+                  <h2 className="mt-2 text-2xl font-semibold text-slate-900">Recent updates</h2>
+                </div>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{recentNotifications.length} items</span>
+              </div>
+              <div className="mt-6 space-y-4">
+                {recentNotifications.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+                    No activity yet. Your latest document updates will appear here.
+                  </div>
+                ) : (
+                  recentNotifications.map((item) => (
+                    <article key={item.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+                          <p className="mt-1 text-sm text-slate-600">{item.message}</p>
+                        </div>
+                        <span className="text-xs text-slate-500">{new Date(item.created_at).toLocaleString()}</span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                        <span className="rounded-full bg-white px-2 py-1 border border-slate-200">{item.milestone || item.channel}</span>
+                        {item.deep_link_url ? (
+                          <a href={item.deep_link_url} className="text-indigo-700 underline">Open</a>
+                        ) : null}
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Create a premium draft</p>
+              <h2 className="mt-2 text-3xl font-semibold text-slate-900">Start your next document</h2>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button onClick={() => handleCreateNew('legal_notice')} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50">Legal Notice</button>
+              <button onClick={() => handleCreateNew('rent_agreement')} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50">Rent Agreement</button>
+              <button onClick={() => handleCreateNew('affidavit')} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50">Affidavit</button>
+            </div>
+          </div>
+
+          <div className="grid gap-5 lg:grid-cols-3">
+            <button onClick={() => handleCreateNew('legal_notice', window.localStorage.getItem('preferred_notice_type') || 'money_recovery')} className="group rounded-[1.75rem] border border-slate-200 bg-white p-6 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+              <div className="inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-[var(--court-midnight)] text-white shadow-card">
+                <FileText className="h-6 w-6" />
+              </div>
+              <p className="mt-5 text-lg font-semibold text-slate-900">Legal Notice</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">Issue a formal legal notice with review and download-ready delivery.</p>
+              <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[var(--court-midnight)]">
+                Start draft
+                <span aria-hidden="true">→</span>
+              </span>
+            </button>
+            <button onClick={() => handleCreateNew('rent_agreement')} className="group rounded-[1.75rem] border border-slate-200 bg-white p-6 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+              <div className="inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-[var(--court-gold)] text-slate-900 shadow-card">
+                <FileText className="h-6 w-6" />
+              </div>
+              <p className="mt-5 text-lg font-semibold text-slate-900">Rent Agreement</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">Create a tenancy agreement with state-specific clauses and witness-ready format.</p>
+              <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[var(--court-midnight)]">
+                Start draft
+                <span aria-hidden="true">→</span>
+              </span>
+            </button>
+            <button onClick={() => handleCreateNew('affidavit')} className="group rounded-[1.75rem] border border-slate-200 bg-white p-6 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+              <div className="inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-slate-900 text-white shadow-card">
+                <Plus className="h-6 w-6" />
+              </div>
+              <p className="mt-5 text-lg font-semibold text-slate-900">Affidavit</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">Build an affidavit with verified statements and a notary-ready preview.</p>
+              <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[var(--court-midnight)]">
+                Start draft
+                <span aria-hidden="true">→</span>
+              </span>
+            </button>
+          </div>
+        </section>
+
+        <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Document Management</p>
+              <h2 className="mt-2 text-2xl font-semibold text-slate-900">Your Documents & Drafts</h2>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setTypeFilter('all')}
+                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${typeFilter === 'all'
+                    ? 'bg-[var(--court-midnight)] text-white shadow-sm'
+                    : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                  }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setTypeFilter('legal_notice')}
+                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${typeFilter === 'legal_notice'
+                    ? 'bg-[var(--court-midnight)] text-white shadow-sm'
+                    : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                  }`}
+              >
+                Notices
+              </button>
+              <button
+                onClick={() => setTypeFilter('rent_agreement')}
+                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${typeFilter === 'rent_agreement'
+                    ? 'bg-[var(--court-midnight)] text-white shadow-sm'
+                    : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                  }`}
+              >
+                Rent
+              </button>
+              <button
+                onClick={() => setTypeFilter('affidavit')}
+                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${typeFilter === 'affidavit'
+                    ? 'bg-[var(--court-midnight)] text-white shadow-sm'
+                    : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                  }`}
+              >
+                Affidavits
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="relative flex-1">
+              <FileSearch className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-400" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by title, type, or status..."
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm text-slate-700 focus:border-[var(--court-midnight)] focus:outline-none focus:ring-2 focus:ring-[var(--court-midnight)]/10"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-medium text-slate-700 focus:border-[var(--court-midnight)] focus:outline-none"
+              >
+                <option value="all">All Statuses</option>
+                <option value="drafting">In Draft</option>
+                <option value="lawyer_review">Under Lawyer Review</option>
+                <option value="verified">Verified / Approved</option>
+                <option value="delivered">Delivered / Completed</option>
+              </select>
+
+              <select
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest' | 'updated')}
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-medium text-slate-700 focus:border-[var(--court-midnight)] focus:outline-none"
+              >
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+                <option value="updated">Recently Updated</option>
+              </select>
+
+              {(search || typeFilter !== 'all' || statusFilter !== 'all' || sortOrder !== 'newest') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch('');
+                    setTypeFilter('all');
+                    setStatusFilter('all');
+                    setSortOrder('newest');
+                  }}
+                  className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-6 overflow-hidden rounded-[1.75rem] border border-slate-200 bg-slate-50">
+            {loading ? (
+              <div className="flex min-h-[240px] items-center justify-center p-10">
+                <div className="inline-block h-10 w-10 animate-spin rounded-full border-4 border-slate-300 border-t-slate-900" />
+              </div>
+            ) : docsToShow.length === 0 ? (
+              <div className="p-10 text-center">
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-100 text-[var(--court-midnight)]">
+                  <Plus className="h-8 w-8" />
+                </div>
+                <h3 className="mt-6 text-2xl font-semibold text-slate-900">No matching documents found</h3>
+                <p className="mt-3 text-sm leading-6 text-slate-600">
+                  {documents.length === 0
+                    ? 'No documents available yet. Start by creating a notice, agreement, or affidavit.'
+                    : 'No documents match your active search or filters.'}
+                </p>
+                <button
+                  onClick={() => handleCreateNew('legal_notice')}
+                  className="mt-6 inline-flex rounded-2xl bg-[var(--court-gold)] px-5 py-3 text-sm font-semibold text-slate-900 shadow-card hover:bg-[var(--court-gold)]/95"
+                >
+                  Create Document
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-separate border-spacing-0 text-left text-sm text-slate-700">
+                  <thead className="bg-slate-100 text-slate-600 font-medium">
+                    <tr>
+                      <th className="px-6 py-4">Document Type</th>
+                      <th className="px-6 py-4">Created Date</th>
+                      <th className="px-6 py-4">Updated Date</th>
+                      <th className="px-6 py-4">Status</th>
+                      <th className="px-6 py-4">Lawyer</th>
+                      <th className="px-6 py-4">Last Activity</th>
+                      <th className="px-6 py-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {docsToShow.map((doc) => {
+                      const meta = mapDocumentStatus(doc);
+                      const act = getNextAction(doc);
+                      const isDraft = doc.is_session_draft || doc.status === 'drafting';
+                      const lastEvent = Array.isArray(doc.timeline_events) && doc.timeline_events.length > 0
+                        ? doc.timeline_events[doc.timeline_events.length - 1]
+                        : null;
+                      const lastActivityLabel = lastEvent?.stage
+                        ? `${lastEvent.stage.replace(/_/g, ' ')} (${lastEvent.actor || 'system'})`
+                        : isDraft ? 'Draft updated' : 'Document submitted';
+                      return (
+                        <tr key={doc.id} className="border-t border-slate-200 bg-white hover:bg-slate-50 transition">
+                          <td className="px-6 py-4 font-semibold text-slate-900">
+                            <div className="flex flex-col">
+                              <span>{typeLabel(doc.document_type)}</span>
+                              {doc.notice_subtype && (
+                                <span className="text-xs text-slate-500 font-normal capitalize">
+                                  {doc.notice_subtype.replace(/_/g, ' ')}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-slate-600 font-mono text-xs">
+                            {new Date(doc.created_at).toLocaleDateString(undefined, {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                            })}
+                          </td>
+                          <td className="px-6 py-4 text-slate-600 font-mono text-xs">
+                            {new Date(doc.updated_at || doc.created_at).toLocaleDateString(undefined, {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                            })}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span
+                              className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider ${meta.badgeBg} ${meta.badgeText}`}
+                            >
+                              {meta.label}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-slate-600">{lawyerStatus(doc)}</td>
+                          <td className="px-6 py-4 text-slate-600 text-xs capitalize">{lastActivityLabel}</td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => {
+                                  if (act.actionType === 'edit') {
+                                    setSelectedType(doc.document_type);
+                                    if (doc.notice_subtype) setSelectedNoticeSubtype(doc.notice_subtype);
+                                    setActiveDraftId(doc.id);
+                                    setSkipDraftSession(false);
+                                    setShowForm(true);
+                                  } else {
+                                    setPreviewDocument(doc);
+                                  }
+                                }}
+                                className="inline-flex rounded-2xl bg-[var(--court-midnight)] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[var(--court-midnight)]/90"
+                              >
+                                {act.label}
+                              </button>
+                              {isDraft && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteDocument(doc.id)}
+                                  className="rounded-2xl border border-slate-200 bg-white p-2 text-slate-400 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 transition"
+                                  title="Delete draft"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="grid gap-6 xl:grid-cols-[1.2fr,0.8fr]">
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm uppercase tracking-[0.2em] text-slate-500">AI assistant</p>
+                <h2 className="mt-2 text-2xl font-semibold text-slate-900">Quick legal actions</h2>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">Live</span>
+            </div>
+            <div className="mt-6 rounded-[1.5rem] border border-slate-200 bg-slate-50 p-5">
+              <div className="flex items-center gap-3">
+                <Mic className="h-5 w-5 text-slate-700" />
+                <p className="text-sm font-semibold text-slate-900">Ask the assistant</p>
+              </div>
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                <input
+                  value={voiceQuestion}
+                  onChange={(e) => setVoiceQuestion(e.target.value)}
+                  placeholder="Ask about your document status"
+                  className="flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 focus:border-[var(--court-midnight)] focus:outline-none focus:ring-2 focus:ring-[var(--court-midnight)]/10"
+                />
+                <button
+                  onClick={askVoiceFaq}
+                  className="rounded-2xl bg-[var(--court-midnight)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--court-midnight)]/90"
+                >
+                  Ask
+                </button>
+              </div>
+              {voiceReply && <p className="mt-4 rounded-3xl bg-white p-4 text-sm leading-6 text-slate-700">{voiceReply}</p>}
+            </div>
+          </div>
+
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Vault</p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-900">Filed documents</h2>
+            <div className="mt-6 grid gap-4">
+              {vaultDocs.length === 0 ? (
+                <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+                  No completed filings yet. Complete a document to move it into your vault.
+                </div>
+              ) : (
+                vaultDocs.map((doc) => (
+                  <div key={doc.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-sm font-semibold text-slate-900">{typeLabel(doc.document_type)}</p>
+                    <p className="mt-1 text-xs text-slate-600">Filed {new Date(doc.created_at).toLocaleDateString()}</p>
+                    <p className="mt-2 text-sm text-slate-700">{expiryText(doc)}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </section>
       </div>
 
       {consultDoc && (

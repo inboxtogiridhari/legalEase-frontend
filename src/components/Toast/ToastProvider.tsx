@@ -14,6 +14,9 @@ interface ToastContextValue {
   unread: number;
   markAsRead: (id: string) => Promise<void>;
   clearAll: () => Promise<void>;
+  panelOpen: boolean;
+  togglePanel: () => void;
+  closePanel: () => void;
 }
 
 const ToastContext = createContext<ToastContextValue | undefined>(undefined);
@@ -32,6 +35,25 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [clearingAll, setClearingAll] = useState(false);
   const socketRef = useRef<Socket | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Close panel when clicking outside or pressing Escape
+  useEffect(() => {
+    if (!panelOpen) return;
+    function handleDown(e: MouseEvent) {
+      if (!panelRef.current) return;
+      if (!panelRef.current.contains(e.target as Node)) setPanelOpen(false);
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setPanelOpen(false);
+    }
+    document.addEventListener('mousedown', handleDown);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleDown);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [panelOpen]);
 
   useEffect(() => {
     if (!user) {
@@ -108,87 +130,77 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <ToastContext.Provider value={{ showToast, notifications, unread, markAsRead, clearAll }}>
+    <ToastContext.Provider
+      value={{
+        showToast,
+        notifications,
+        unread,
+        markAsRead,
+        clearAll,
+        panelOpen,
+        togglePanel: () => setPanelOpen((prev) => !prev),
+        closePanel: () => setPanelOpen(false),
+      }}
+    >
       {children}
-
-      {user && (
-        <div className="fixed right-4 top-4 z-[9999] flex items-start gap-3">
-          <button
-            type="button"
-            onClick={() => setPanelOpen((prev) => !prev)}
-            className="relative rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 text-slate-800 shadow-xl backdrop-blur"
-          >
-            <span className="inline-flex items-center gap-2 text-sm font-medium">
-              <Bell className="h-4 w-4" />
-              Alerts
-            </span>
-            {unread > 0 && (
-              <span className="absolute -right-2 -top-2 rounded-full bg-rose-600 px-2 py-0.5 text-xs font-semibold text-white">
-                {unread}
-              </span>
-            )}
-          </button>
-
-          {panelOpen && (
-            <div className="w-[22rem] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
-              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">Realtime Updates</p>
-                  <p className="text-xs text-slate-500">Document milestones and lawyer actions</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void clearAll()}
-                    disabled={notifications.length === 0 || clearingAll}
-                    className="rounded-full px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-40"
-                  >
-                    {clearingAll ? 'Clearing...' : 'Clear All'}
-                  </button>
-                  <button type="button" onClick={() => setPanelOpen(false)} className="rounded-full p-1 text-slate-500 hover:bg-slate-100">
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-              <div className="max-h-[28rem] overflow-auto">
-                {notifications.length === 0 ? (
-                  <div className="px-4 py-8 text-sm text-slate-500">No notifications yet.</div>
-                ) : (
-                  notifications.map((item) => (
-                    <div key={item.id} className="border-b border-slate-100 px-4 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-                          <p className="mt-1 text-sm text-slate-600">{item.message}</p>
-                          <p className="mt-1 text-xs text-slate-400">{new Date(item.created_at).toLocaleString()}</p>
-                        </div>
-                        {item.status !== 'read' && (
-                          <button
-                            type="button"
-                            onClick={() => void markAsRead(item.id)}
-                            className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
-                            title="Mark as read"
-                          >
-                            <CheckCheck className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                      {item.deep_link_url && (
-                        <a
-                          href={item.deep_link_url}
-                          onClick={() => void markAsRead(item.id)}
-                          className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-indigo-700"
-                        >
-                          Open tracking
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
+      {user && panelOpen && (
+        <div ref={(el) => (panelRef.current = el)} className="fixed right-4 top-20 z-20 w-[22rem] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Realtime Updates</p>
+              <p className="text-xs text-slate-500">Document milestones and lawyer actions</p>
             </div>
-          )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void clearAll()}
+                disabled={notifications.length === 0 || clearingAll}
+                className="rounded-full px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+              >
+                {clearingAll ? 'Clearing...' : 'Clear All'}
+              </button>
+              <button type="button" onClick={() => setPanelOpen(false)} className="rounded-full p-1 text-slate-500 hover:bg-slate-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <div className="max-h-[28rem] overflow-auto">
+            {notifications.length === 0 ? (
+              <div className="px-4 py-8 text-sm text-slate-500">No notifications yet.</div>
+            ) : (
+              notifications.map((item) => (
+                <div key={item.id} className="border-b border-slate-100 px-4 py-3 last:border-b-0">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+                      <p className="mt-1 text-sm text-slate-600">{item.message}</p>
+                      <p className="mt-1 text-xs text-slate-400">{new Date(item.created_at).toLocaleString()}</p>
+                    </div>
+                    {item.status !== 'read' && (
+                      <button
+                        type="button"
+                        onClick={() => void markAsRead(item.id)}
+                        className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
+                        title="Mark as read"
+                      >
+                        <CheckCheck className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  {item.deep_link_url && (
+                    <a
+                      href={item.deep_link_url}
+                      onClick={() => void markAsRead(item.id)}
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-indigo-700"
+                    >
+                      Open tracking
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
     </ToastContext.Provider>

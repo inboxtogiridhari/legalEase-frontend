@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import AuthPage from './components/Auth/AuthPage';
 import ClientDashboard from './components/ClientDashboard/ClientDashboard';
@@ -10,15 +10,31 @@ import AdminPanel from './components/Admin/AdminPanel';
 
 type ClientServiceRoute = 'legal_notice' | 'rent_agreement' | 'affidavit' | null;
 
+export function spaNavigate(to: string) {
+  if (window.location.pathname !== to) {
+    window.history.pushState({}, '', to);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }
+}
+
 function AppContent() {
   const { user, profile, loading } = useAuth();
   const [showAuth, setShowAuth] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
-  const path = window.location.pathname;
-  if (path.startsWith('/notice/verify/') || path.startsWith('/verify/')) {
-    const secureToken = path.startsWith('/verify/')
-      ? path.replace('/verify/', '').split('/')[0]
-      : path.replace('/notice/verify/', '').split('/')[0];
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPath(window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  if (currentPath.startsWith('/notice/verify/') || currentPath.startsWith('/verify/')) {
+    const secureToken = currentPath.startsWith('/verify/')
+      ? currentPath.replace('/verify/', '').split('/')[0]
+      : currentPath.replace('/notice/verify/', '').split('/')[0];
     return <AdversaryPortal secureToken={secureToken} />;
   }
 
@@ -41,7 +57,9 @@ function AppContent() {
 
   if (!user || !profile) {
     if (showAdmin) return <AdminPanel onBack={() => setShowAdmin(false)} />;
-    if (showAuth) return <AuthPage onBackToLanding={() => setShowAuth(false)} onOpenAdmin={() => setShowAdmin(true)} />;
+    if (showAuth || currentPath === '/login' || currentPath === '/signup') {
+      return <AuthPage onBackToLanding={() => setShowAuth(false)} onOpenAdmin={() => setShowAdmin(true)} />;
+    }
     return <LandingPage onGetStarted={() => setShowAuth(true)} onOpenAdmin={() => setShowAdmin(true)} />;
   }
 
@@ -50,12 +68,18 @@ function AppContent() {
   }
 
   const clientRouteMap: Record<string, ClientServiceRoute> = {
+    '/dashboard/legal-notice': 'legal_notice',
     '/dashboard/legal-notices': 'legal_notice',
+    '/notice-form': 'legal_notice',
+    '/dashboard/rent-agreement': 'rent_agreement',
     '/dashboard/rent-agreements': 'rent_agreement',
+    '/rent-form': 'rent_agreement',
+    '/dashboard/affidavit': 'affidavit',
     '/dashboard/affidavits': 'affidavit',
+    '/affidavit-form': 'affidavit',
   };
 
-  return <ClientDashboard serviceRoute={clientRouteMap[path] || null} />;
+  return <ClientDashboard serviceRoute={clientRouteMap[currentPath] || null} />;
 }
 
 function App() {

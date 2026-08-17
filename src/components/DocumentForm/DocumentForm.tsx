@@ -1,5 +1,5 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Bot, CheckCircle, QrCode, Save, Smartphone, X } from 'lucide-react';
+import { Bot, CheckCircle, QrCode, Smartphone, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   apiAssistantHelp,
@@ -15,12 +15,25 @@ import { Document, PaymentIntentOrder } from '../../types';
 import { useToast } from '../Toast/ToastProvider';
 import { INDIAN_STATES } from '../../constants/indianStates';
 import { generatePuterLegalDraft } from '../../lib/legalDrafting';
+import { validateField } from '../../utils/validators';
+
+import { WizardLayout } from '../document-wizard/WizardLayout';
+import { WizardHeader } from '../document-wizard/WizardHeader';
+import { WizardStepper } from '../document-wizard/WizardStepper';
+import { WizardFooter } from '../document-wizard/WizardFooter';
+import { AutoSaveIndicator } from '../document-wizard/AutoSaveIndicator';
+import { ValidationSummary } from '../document-wizard/ValidationSummary';
+import { WizardProvider } from '../document-wizard/WizardContext';
+import { useAutoSave } from '../document-wizard/useAutoSave';
+import WizardTransition from '../document-wizard/WizardTransition';
 
 interface DocumentFormProps {
   documentType: 'legal_notice' | 'rent_agreement' | 'affidavit';
   preselectedNoticeSubtype?: string;
   skipDraftSession?: boolean;
+  initialDraftId?: string;
   onClose: () => void;
+  onSuccess?: (createdDoc?: unknown) => void;
 }
 
 type SchemaField = {
@@ -41,7 +54,14 @@ type FormSchema = {
   steps: SchemaStep[];
 };
 
-export default function DocumentForm({ documentType, preselectedNoticeSubtype, skipDraftSession = false, onClose }: DocumentFormProps) {
+export default function DocumentForm({
+  documentType,
+  preselectedNoticeSubtype,
+  skipDraftSession = false,
+  initialDraftId,
+  onClose,
+  onSuccess,
+}: DocumentFormProps) {
   const { user, profile } = useAuth();
   const { showToast } = useToast();
   const { t } = useTranslation();
@@ -109,15 +129,20 @@ export default function DocumentForm({ documentType, preselectedNoticeSubtype, s
       }
       try {
         setLoadingDraft(true);
-        const { draft } = await apiDraftSessionGet(documentType);
+        const { draft } = await apiDraftSessionGet(documentType, initialDraftId);
         if (!active || !draft) return;
         const d = draft as Document;
         setDraftSessionId(d.id);
         setStateLaw(d.state_law || 'Maharashtra');
+        if (d.notice_subtype) {
+          setFormData((prev) => ({ ...prev, noticeType: d.notice_subtype || '' }));
+        }
         if (d.memory_snapshot?.currentStep && typeof d.memory_snapshot.currentStep === 'number') {
           setCurrentStep(Number(d.memory_snapshot.currentStep));
         }
-        setFormData((prev) => ({ ...prev, ...((d.form_data as unknown) as Record<string, string>) }));
+        if (d.form_data && typeof d.form_data === 'object') {
+          setFormData((prev) => ({ ...prev, ...((d.form_data as unknown) as Record<string, string>) }));
+        }
       } catch (error) {
         console.error('Failed to load draft session:', error);
       } finally {
@@ -128,36 +153,45 @@ export default function DocumentForm({ documentType, preselectedNoticeSubtype, s
     return () => {
       active = false;
     };
-  }, [documentType, skipDraftSession]);
+  }, [documentType, skipDraftSession, initialDraftId]);
 
-  useEffect(() => {
-    if (loadingDraft || loadingSchema) return;
-    const timer = window.setTimeout(async () => {
-      try {
-        const response = await apiDraftSessionSave({
-          id: draftSessionId || undefined,
-          document_type: documentType,
-          notice_subtype: noticeSubtype || undefined,
-          form_data: formData as object,
-          state_law: stateLaw,
-          memory_snapshot: {
-            currentStep,
-            lastSavedAt: new Date().toISOString(),
-          },
-        });
-        const nextId = (response.draft as Document)?.id;
-        if (nextId && nextId !== draftSessionId) {
-          setDraftSessionId(nextId);
-        }
-      } catch (error) {
-        console.error('Draft autosave failed:', error);
+  // Use centralized autosave hook to debounce and persist draft sessions
+  const { status: autoSaveStatus, lastSavedAt } = useAutoSave(
+    {
+      id: draftSessionId || undefined,
+      document_type: documentType,
+      notice_subtype: noticeSubtype || undefined,
+      form_data: formData as object,
+      state_law: stateLaw,
+      memory_snapshot: {
+        currentStep,
+      },
+    },
+    async (payload: {
+      id?: string;
+      document_type: 'legal_notice' | 'rent_agreement' | 'affidavit';
+      notice_subtype?: string;
+      state_law?: string;
+      form_data: object;
+      memory_snapshot?: Record<string, unknown>;
+    }) => {
+      if (loadingDraft || loadingSchema) return;
+      const response = await apiDraftSessionSave(payload);
+      const nextId = (response.draft as Document)?.id;
+      if (nextId && nextId !== draftSessionId) {
+        setDraftSessionId(nextId);
       }
-    }, 1000);
-    return () => window.clearTimeout(timer);
-  }, [loadingDraft, loadingSchema, draftSessionId, documentType, noticeSubtype, formData, stateLaw, currentStep]);
+      return response;
+    },
+    1000
+  );
 
-  const totalSteps = schema?.steps?.length || (documentType === 'affidavit' ? 3 : 4);
-  const activeStep = schema?.steps?.[currentStep - 1];
+  const indicatorStatus = autoSaveStatus === 'idle' ? 'saved' : (autoSaveStatus as 'saving' | 'saved' | 'error');
+
+  const schemaSteps = schema?.steps || [];
+  const totalSteps = (schemaSteps?.length || (documentType === 'affidavit' ? 3 : 4)) + 1; // +1 for Review step
+  const activeStep = currentStep <= (schemaSteps?.length || 0) ? schemaSteps?.[currentStep - 1] : null;
+  const isReviewStep = currentStep === totalSteps;
 
   const titles = {
     legal_notice: t('forms.createLegalNotice'),
@@ -170,6 +204,17 @@ export default function DocumentForm({ documentType, preselectedNoticeSubtype, s
     if (value && missingKeys.includes(field)) {
       setMissingKeys((prev) => prev.filter((k) => k !== field));
     }
+  }
+
+  function validateCurrentStepKeys(): string[] {
+    if (!activeStep) return [];
+    const keys: string[] = [];
+    activeStep.fields.forEach((field) => {
+      const value = formData[field.key];
+      const err = validateField(field.key, field.label, value, { required: field.required, type: field.type });
+      if (err) keys.push(field.key);
+    });
+    return keys;
   }
 
   function formatCurrency(amount: number) {
@@ -192,16 +237,7 @@ export default function DocumentForm({ documentType, preselectedNoticeSubtype, s
     setPaymentOrder(null);
   }
 
-  function validateCurrentStep(): string[] {
-    if (!activeStep) return [];
-    const missing: string[] = [];
-    activeStep.fields.forEach((field) => {
-      if (!field.required) return;
-      const value = String(formData[field.key] || '').trim();
-      if (!value) missing.push(field.label || field.key);
-    });
-    return missing;
-  }
+  // legacy helper removed in favor of validateCurrentStepKeys
 
   async function askAssistant() {
     if (!assistantTerm.trim()) {
@@ -230,9 +266,11 @@ export default function DocumentForm({ documentType, preselectedNoticeSubtype, s
   }
 
   async function handleSubmit() {
-    if (proofFiles.length === 0) {
-      showToast(t('forms.missingProof'), 'error');
-      return;
+    let proofFilesToUpload = [...proofFiles];
+    if (proofFilesToUpload.length === 0) {
+      const summaryText = `Client Self-Declaration\nDocument Type: ${documentType}\nState Law: ${stateLaw}\nSubmitted At: ${new Date().toISOString()}\nDetails:\n${JSON.stringify(formData, null, 2)}`;
+      const fallbackFile = new File([summaryText], 'client_declaration.txt', { type: 'text/plain' });
+      proofFilesToUpload = [fallbackFile];
     }
     setLoading(true);
     try {
@@ -273,7 +311,7 @@ export default function DocumentForm({ documentType, preselectedNoticeSubtype, s
         console.error('Puter draft generation failed, using backend fallback:', draftError);
       }
 
-      await apiDocumentsCreate({
+      const createdDoc = await apiDocumentsCreate({
         document_type: documentType,
         client_email: user?.email ?? profile?.email ?? undefined,
         notice_subtype: noticeSubtype || undefined,
@@ -289,11 +327,12 @@ export default function DocumentForm({ documentType, preselectedNoticeSubtype, s
           assistantTerm,
         },
         form_data: formData as object,
-        proof: proofFiles.length ? proofFiles : undefined,
+        proof: proofFilesToUpload,
       });
 
       setSuccess(true);
       showToast(t('forms.submitSuccessBody'), 'success');
+      onSuccess?.(createdDoc);
       setTimeout(() => {
         onClose();
       }, 2000);
@@ -307,204 +346,252 @@ export default function DocumentForm({ documentType, preselectedNoticeSubtype, s
 
   if (success) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-12 text-center max-w-md mx-auto mt-20">
-        <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-          <CheckCircle className="w-10 h-10 text-green-600" />
+      <WizardLayout>
+        <div className="p-12 text-center">
+          <div className="bg-emerald-100 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
+            <CheckCircle className="w-12 h-12 text-emerald-600" />
+          </div>
+          <h3 className="text-3xl font-bold text-slate-900 mb-3">{t('forms.submitSuccessTitle')}</h3>
+          <p className="text-slate-600 text-lg">{t('forms.submitSuccessBody')}</p>
         </div>
-        <h3 className="text-2xl font-bold text-slate-900 mb-2">{t('forms.submitSuccessTitle')}</h3>
-        <p className="text-slate-600">{t('forms.submitSuccessBody')}</p>
-      </div>
+      </WizardLayout>
     );
   }
 
   if (loadingSchema) {
-    return <div className="text-center py-10">Loading form schema...</div>;
+    return (
+      <WizardLayout>
+        <div className="p-16 text-center text-slate-500">
+          <div className="animate-spin w-10 h-10 border-4 border-slate-200 border-t-[#1a237e] rounded-full mx-auto mb-4" />
+          <p className="text-lg font-medium">Loading secure form...</p>
+        </div>
+      </WizardLayout>
+    );
   }
 
   return (
-    <div className="max-w-5xl mx-auto">
-      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-        <div className="bg-slate-900 text-white p-6">
-          <button
-            onClick={onClose}
-            className="flex items-center gap-2 text-slate-300 hover:text-white mb-4"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            {t('nav.backHome')}
-          </button>
-          <h2 className="text-2xl font-bold">{titles[documentType]}</h2>
-          <div className="flex items-center gap-2 mt-4">
-            {Array.from({ length: totalSteps }, (_, i) => (
-              <div
-                key={i}
-                className={`flex-1 h-2 rounded-full ${
-                  i + 1 <= currentStep ? 'bg-white' : 'bg-slate-700'
-                }`}
+    <>
+      <WizardProvider totalSteps={totalSteps} controlledStep={currentStep} onStepChange={setCurrentStep}>
+        <WizardLayout>
+          <WizardHeader title={titles[documentType]} onClose={onClose}>
+            {draftSessionId && (
+              <AutoSaveIndicator 
+                status={indicatorStatus} 
+                lastSavedAt={lastSavedAt || undefined} 
               />
-            ))}
-          </div>
-          <p className="text-slate-300 text-sm mt-2">
-            {t('forms.step', { current: currentStep, total: totalSteps })} {draftSessionId ? `| ${t('forms.autosaved')}` : ''}
-          </p>
-        </div>
+            )}
+          </WizardHeader>
 
-        <div className="p-8 space-y-6">
-          <div className="grid md:grid-cols-2 gap-4 bg-slate-50 border border-slate-200 rounded-lg p-4">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">{t('forms.stateLaw')}</label>
-              <input
-                value={stateLaw}
-                onChange={(e) => setStateLaw(e.target.value)}
-                list="document-state-law"
-                placeholder={t('forms.stateLawPlaceholder')}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg"
-              />
-              <datalist id="document-state-law">
-                {INDIAN_STATES.map((state) => (
-                  <option key={state} value={state} />
-                ))}
-              </datalist>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">{t('forms.assistant')}</label>
-              <div className="flex gap-2">
+        <WizardStepper currentStep={currentStep} totalSteps={totalSteps} />
+
+        <div className="p-8 sm:p-10">
+          <ValidationSummary missingFields={missingKeys} />
+
+          <div className="mb-10 p-6 bg-slate-50/80 border border-slate-200 rounded-xl space-y-4 shadow-sm">
+            <div className="grid md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">{t('forms.stateLaw')}</label>
                 <input
-                  value={assistantTerm}
-                  onChange={(e) => setAssistantTerm(e.target.value)}
-                  placeholder={t('forms.assistantPlaceholder')}
-                  className="flex-1 px-3 py-2 border border-slate-300 rounded-lg"
+                  value={stateLaw}
+                  onChange={(e) => setStateLaw(e.target.value)}
+                  list="document-state-law"
+                  placeholder={t('forms.stateLawPlaceholder')}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#1a237e]/20 focus:border-[#1a237e] outline-none transition-colors shadow-sm"
                 />
-                <button
-                  type="button"
-                  onClick={askAssistant}
-                  disabled={assistantLoading}
-                  className="inline-flex items-center gap-1 px-3 py-2 bg-slate-900 text-white rounded-lg text-sm"
-                >
-                  <Bot className="w-4 h-4" />
-                  {assistantLoading ? t('common.thinking') : t('common.ask')}
-                </button>
+                <datalist id="document-state-law">
+                  {INDIAN_STATES.map((state) => (
+                    <option key={state} value={state} />
+                  ))}
+                </datalist>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">{t('forms.assistant')}</label>
+                <div className="flex gap-2">
+                  <input
+                    value={assistantTerm}
+                    onChange={(e) => setAssistantTerm(e.target.value)}
+                    placeholder={t('forms.assistantPlaceholder')}
+                    className="flex-1 px-4 py-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#1a237e]/20 focus:border-[#1a237e] outline-none transition-colors shadow-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={askAssistant}
+                    disabled={assistantLoading}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors disabled:opacity-50 shadow-sm"
+                  >
+                    <Bot className="w-4 h-4" />
+                    {assistantLoading ? t('common.thinking') : t('common.ask')}
+                  </button>
+                </div>
               </div>
             </div>
             {assistantReply && (
-              <div className="md:col-span-2 text-sm bg-white border border-slate-200 rounded-lg p-3 whitespace-pre-wrap text-slate-700">
+              <div className="mt-4 p-5 bg-[#1a237e]/5 border border-[#1a237e]/20 rounded-lg text-sm text-[#1a237e] whitespace-pre-wrap leading-relaxed shadow-inner">
                 {assistantReply}
               </div>
             )}
           </div>
 
           {activeStep && (
-            <div className="space-y-4">
-              <h3 className="text-xl font-semibold text-slate-900">{activeStep.title}</h3>
-              {activeStep.fields.map((field) => {
-                const value = formData[field.key] || '';
-                const isMissing = missingKeys.includes(field.key);
-                const baseClass = `w-full px-4 py-2 border rounded-lg ${isMissing ? 'border-red-400 bg-red-50' : 'border-slate-300'}`;
-                const commonProps = {
-                  value,
-                  onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => updateField(field.key, e.target.value),
-                  className: baseClass,
-                };
+            <WizardTransition>
+              <div className="space-y-8">
+              <div className="mb-2 border-b border-slate-100 pb-4">
+                <h3 className="text-2xl font-bold text-slate-900">{activeStep.title}</h3>
+                <p className="text-slate-500 mt-1">Please fill in the details accurately below.</p>
+              </div>
+              
+              <div className="grid gap-6">
+                {activeStep.fields.map((field) => {
+                  const value = formData[field.key] || '';
+                  const isMissing = missingKeys.includes(field.key);
+                  const baseClass = `w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 transition-all shadow-sm ${
+                    isMissing 
+                      ? 'border-rose-300 bg-rose-50 focus:ring-rose-200 focus:border-rose-400' 
+                      : 'bg-white border-slate-300 focus:ring-[#1a237e]/20 focus:border-[#1a237e] hover:border-slate-400'
+                  }`;
+                  
+                  const commonProps: {
+                    id: string;
+                    name: string;
+                    value: string;
+                    onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
+                    className: string;
+                    'aria-invalid'?: boolean;
+                    'aria-describedby'?: string;
+                  } = {
+                    id: `field-${field.key}`,
+                    name: field.key,
+                    value,
+                    onChange: (e) => updateField(field.key, e.target.value),
+                    className: baseClass,
+                    'aria-invalid': isMissing || undefined,
+                    'aria-describedby': isMissing ? `err-${field.key}` : undefined,
+                  };
 
-                if (field.type === 'textarea') {
-                  return (
-                    <div key={field.key}>
-                      <label className="block text-sm font-medium text-slate-700 mb-2">{field.label}</label>
-                      <textarea rows={4} {...commonProps} />
-                      {isMissing && <p className="text-xs text-red-600 mt-1">Required</p>}
-                    </div>
-                  );
-                }
-
-                if (field.type === 'select') {
-                  return (
-                    <div key={field.key}>
-                      <label className="block text-sm font-medium text-slate-700 mb-2">{field.label}</label>
-                      <select {...commonProps}>
-                        <option value="">Select</option>
-                        {(field.options || []).map((opt) => (
-                          <option key={opt.id} value={opt.id}>{opt.label}</option>
-                        ))}
-                      </select>
-                      {isMissing && <p className="text-xs text-red-600 mt-1">Required</p>}
-                    </div>
-                  );
-                }
-
-                return (
-                  <div key={field.key}>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">{field.label}</label>
-                    <input type={field.type || 'text'} {...commonProps} />
-                    {isMissing && <p className="text-xs text-red-600 mt-1">Required</p>}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {currentStep === totalSteps && (
-            <div className="mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                {t('forms.proofLabel')}
-              </label>
-              <input
-                type="file"
-                multiple
-                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif"
-                onChange={(e) => setProofFiles(Array.from(e.target.files || []))}
-                className="w-full text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-slate-200 file:text-slate-800"
-              />
-              {proofFiles.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  <p className="text-slate-500 text-sm">{t('forms.proofSelected', { count: proofFiles.length })}</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="flex justify-between mt-8 pt-6 border-t">
-            <button
-              onClick={() => setCurrentStep(Math.max(1, currentStep - 1))}
-              disabled={currentStep === 1}
-              className="flex items-center gap-2 px-6 py-2 border-2 border-slate-300 rounded-lg font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              {t('common.previous')}
-            </button>
-
-            {currentStep < totalSteps ? (
-              <button
-                onClick={() => {
-                  const missing = validateCurrentStep();
-                  if (missing.length) {
-                    const keys = (activeStep?.fields || []).filter((f) => f.required && !String(formData[f.key] || '').trim()).map((f) => f.key);
-                    setMissingKeys(keys);
-                    showToast(t('forms.missingFields', { fields: missing.join(', ') }), 'error');
-                    return;
+                  if (field.type === 'textarea') {
+                    return (
+                      <div key={field.key}>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                          {field.label} {field.required && <span className="text-rose-500">*</span>}
+                        </label>
+                        <textarea rows={4} {...commonProps} />
+                      </div>
+                    );
                   }
-                  setMissingKeys([]);
-                  setCurrentStep(currentStep + 1);
-                }}
-                className="flex items-center gap-2 px-6 py-2 bg-slate-900 text-white rounded-lg font-semibold hover:bg-slate-800 transition-colors"
-              >
-                {t('common.next')}
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            ) : (
-              <button
-                onClick={handleSubmit}
-                disabled={loading}
-                className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <Save className="w-4 h-4" />
-                {loading ? t('common.processing') : t('common.submit')}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
 
+                  if (field.type === 'select') {
+                    return (
+                      <div key={field.key}>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                          {field.label} {field.required && <span className="text-rose-500">*</span>}
+                        </label>
+                        <select {...commonProps}>
+                          <option value="">Select an option</option>
+                          {(field.options || []).map((opt) => (
+                            <option key={opt.id} value={opt.id}>{opt.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={field.key}>
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">
+                        {field.label} {field.required && <span className="text-rose-500">*</span>}
+                      </label>
+                      <input type={field.type || 'text'} {...commonProps} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            </WizardTransition>
+          )}
+          {isReviewStep && (
+            <div className="mt-6 space-y-6">
+              <div className="bg-white border border-slate-200 rounded-xl p-6">
+                <h3 className="text-lg font-semibold text-slate-900 mb-3">Review your information</h3>
+                <div className="text-sm text-slate-700 space-y-3">
+                  {Object.entries(formData).map(([key, value]) => (
+                    <div key={key} className="flex items-start justify-between gap-4">
+                      <div className="text-slate-600 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</div>
+                      <div className="text-slate-900 whitespace-pre-wrap text-right max-w-[60%]">{String(value)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-4 p-6 bg-slate-50 border border-slate-200 rounded-xl">
+                <label className="block text-lg font-bold text-slate-900 mb-2">{t('forms.proofLabel')}</label>
+                <p className="text-slate-500 mb-4">Upload supporting documents (PDF, JPG, PNG). These will be provided to your lawyer for review.</p>
+
+                <div className="mt-1 flex justify-center px-6 pt-8 pb-10 border-2 border-slate-300 border-dashed rounded-xl bg-white hover:bg-slate-50 transition-colors shadow-inner">
+                  <div className="space-y-2 text-center">
+                    <svg className="mx-auto h-12 w-12 text-slate-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                      <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <div className="flex text-sm text-slate-600 justify-center">
+                      <label htmlFor="file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-[#1a237e] hover:text-[#1a237e]/80 focus-within:outline-none">
+                        <span>Upload files</span>
+                        <input
+                          id="file-upload"
+                          name="file-upload"
+                          type="file"
+                          className="sr-only"
+                          multiple
+                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif"
+                          onChange={(e) => setProofFiles(Array.from(e.target.files || []))}
+                        />
+                      </label>
+                      <p className="pl-1">or drag and drop</p>
+                    </div>
+                    <p className="text-xs text-slate-500">Up to 10MB per file</p>
+                  </div>
+                </div>
+
+                {proofFiles.length > 0 && (
+                  <div className="mt-6 p-4 bg-white border border-slate-200 rounded-lg shadow-sm">
+                    <p className="text-sm font-semibold text-slate-700 mb-2">{t('forms.proofSelected', { count: proofFiles.length })}</p>
+                    <ul className="text-sm text-slate-600 list-disc list-inside space-y-1">
+                      {proofFiles.map((f, i) => <li key={i}>{f.name}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <WizardFooter
+          currentStep={currentStep}
+          totalSteps={totalSteps}
+          isLoading={loading}
+          onPrevious={() => setCurrentStep(Math.max(1, currentStep - 1))}
+          onNext={() => {
+            const missingKeysHere = validateCurrentStepKeys();
+            if (missingKeysHere.length) {
+              setMissingKeys(missingKeysHere);
+              // focus first missing field
+              const first = document.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(`[name="${missingKeysHere[0]}"]`);
+              if (first) first.focus();
+              const missingLabels = (activeStep?.fields || []).filter((f) => missingKeysHere.includes(f.key)).map((f) => f.label || f.key);
+              showToast(t('forms.missingFields', { fields: missingLabels.join(', ') }), 'error');
+              return;
+            }
+            setMissingKeys([]);
+            setCurrentStep(currentStep + 1);
+          }}
+          nextLabel={currentStep + 1 === totalSteps ? 'Review' : 'Next'}
+          submitLabel={'Generate Draft'}
+          onSubmit={handleSubmit}
+        />
+        </WizardLayout>
+      </WizardProvider>
+
+      {/* Payment Modal remains outside the layout but visible */}
       {paymentOrder && (
-        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/40 p-4">
+        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg overflow-hidden rounded-[2rem] border border-slate-200 bg-[linear-gradient(180deg,#fffef7,#ffffff_35%,#eff6ff)] shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
               <div>
@@ -526,7 +613,7 @@ export default function DocumentForm({ documentType, preselectedNoticeSubtype, s
                 <p className="mt-2 text-3xl font-bold text-slate-900">{formatCurrency(paymentOrder.amount)}</p>
                 <p className="mt-1 text-xs text-slate-500">Order ID: {paymentOrder.order_id}</p>
                 <div className="mt-4 flex justify-center">
-                  <img src={paymentOrder.qr_code_data_url} alt="UPI QR code" className="h-56 w-56 rounded-3xl border border-slate-200 bg-white p-3" />
+                  <img src={paymentOrder.qr_code_data_url} alt="UPI QR code" className="h-56 w-56 rounded-3xl border border-slate-200 bg-white p-3 shadow-sm" />
                 </div>
                 <p className="mt-3 inline-flex items-center gap-2 text-sm text-slate-600">
                   <QrCode className="h-4 w-4" />
@@ -541,20 +628,20 @@ export default function DocumentForm({ documentType, preselectedNoticeSubtype, s
                     <a
                       key={app.id}
                       href={app.intent_url}
-                      className="rounded-3xl border border-slate-200 bg-white px-3 py-4 text-center text-sm font-semibold text-slate-700 shadow-sm hover:border-slate-900"
+                      className="rounded-3xl border border-slate-200 bg-white px-3 py-4 text-center text-sm font-semibold text-slate-700 shadow-sm hover:border-slate-900 transition-all hover:shadow-md"
                     >
-                      <Smartphone className="mx-auto mb-2 h-4 w-4" />
+                      <Smartphone className="mx-auto mb-2 h-4 w-4 text-[#1a237e]" />
                       {app.label}
                     </a>
                   ))}
                 </div>
               </div>
 
-              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end mt-6">
                 <button
                   type="button"
                   onClick={() => closePaymentPrompt({ paid: false })}
-                  className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
+                  className="rounded-full border border-slate-300 px-6 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 >
                   Cancel
                 </button>
@@ -572,7 +659,7 @@ export default function DocumentForm({ documentType, preselectedNoticeSubtype, s
                       setConfirmingPayment(false);
                     }
                   }}
-                  className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  className="rounded-full bg-[#1a237e] hover:bg-[#1a237e]/90 px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-60 shadow-sm"
                 >
                   {confirmingPayment ? 'Confirming payment...' : 'I have paid'}
                 </button>
@@ -581,6 +668,6 @@ export default function DocumentForm({ documentType, preselectedNoticeSubtype, s
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

@@ -1,9 +1,10 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiLawyerProfile, apiProfileMe, apiProfileUpdate } from '../../lib/api';
 import { Profile } from '../../types';
 import { useToast } from '../Toast/ToastProvider';
+import { validatePhone } from '../../utils/validators';
 
 interface ProfilePageProps {
   onBack: () => void;
@@ -66,6 +67,12 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
 
   async function saveProfile() {
     const missing = [...validateClientCommon(), ...(isLawyer ? validateLawyerExtra() : [])];
+    if (form.phone_number && !validatePhone(form.phone_number)) {
+      if (!missing.includes('phone_number')) missing.push('phone_number');
+      showToast('Phone number must be digits only (10-15 digits)', 'error');
+      setMissingFields(missing);
+      return;
+    }
     if (missing.length) {
       setMissingFields(missing);
       showToast(t('profile.missingFields'), 'error');

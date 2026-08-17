@@ -37,7 +37,7 @@ const resources = {
       landing: {
         heroSlides: [
           'Draft Court-Ready Notices in 5 Minutes',
-          'Verified by Supreme Court & High Court Advocates',
+          'Verified by experienced advocates',
           'Automated Speed Post Delivery Across India',
         ],
         headline: 'Create legally-structured notices in minutes',
@@ -251,7 +251,7 @@ const resources = {
       landing: {
         heroSlides: [
           '5 मिनट में कोर्ट-रेडी नोटिस ड्राफ्ट करें',
-          'सुप्रीम कोर्ट और हाई कोर्ट अधिवक्ताओं द्वारा सत्यापित',
+          'अनुभवी अधिवक्ताओं द्वारा सत्यापित',
           'भारत भर में ऑटोमेटेड स्पीड पोस्ट डिलीवरी',
         ],
         headline: 'मिनटों में कानूनी नोटिस तैयार करें',
@@ -465,7 +465,7 @@ const resources = {
       landing: {
         heroSlides: [
           '5 minutes me Court-Ready notice draft karo',
-          'Supreme Court aur High Court advocates verified',
+          'Experienced advocates verified',
           'India-wide automated Speed Post delivery',
         ],
         headline: 'Minutes me legal notice ready karo',

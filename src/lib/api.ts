@@ -554,8 +554,14 @@ export async function apiAssistantHelp(payload: {
   });
 }
 
-export async function apiDraftSessionGet(documentType: 'legal_notice' | 'rent_agreement' | 'affidavit'): Promise<{ draft: unknown | null }> {
-  return apiFetch(`/api/documents/draft-session?document_type=${encodeURIComponent(documentType)}`);
+export async function apiDraftSessionGet(
+  documentType?: 'legal_notice' | 'rent_agreement' | 'affidavit' | string,
+  draftId?: string
+): Promise<{ draft: unknown | null }> {
+  const params = new URLSearchParams();
+  if (draftId) params.set('id', draftId);
+  if (documentType) params.set('document_type', documentType);
+  return apiFetch(`/api/documents/draft-session?${params.toString()}`);
 }
 
 export async function apiDraftSessionSave(payload: {

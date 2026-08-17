@@ -1,36 +1,92 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Design Tokens ──────────────────────────────────────── */
 :root {
-  --court-midnight: #1a237e;
-  --court-charcoal: #263238;
-  --court-gold: #d4af37;
-  --court-ivory: #f7f4ea;
+  --bg-base:          #F8FAFC;
+  --bg-section:       #EFF6FF;
+  --bg-card:          #FFFFFF;
+
+  --primary:          #2563EB;
+  --primary-dark:     #1E3A8A;
+  --primary-light:    #DBEAFE;
+
+  --border:           #E2E8F0;
+
+  --text-primary:     #0F172A;
+  --text-secondary:   #475569;
+  --text-muted:       #64748B;
+
+  --success:          #16A34A;
+  --danger:           #DC2626;
+
+  /* Legacy aliases — kept so any remaining usages don't break */
+  --court-midnight:   #1E3A8A;
+  --court-gold:       #2563EB;
+  --court-charcoal:   #1E40AF;
+  --court-ivory:      #EFF6FF;
+}
+
+/* ─── Base ───────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  font-family: 'Source Sans 3', sans-serif;
-  background: radial-gradient(circle at top right, #fdf7e5 0%, #f8f8fb 38%, #eef1f6 100%);
-  color: #1e293b;
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-h1, h2, h3, .font-law {
-  font-family: 'Playfair Display', serif;
-  letter-spacing: 0.02em;
+h1, h2, h3, h4, .font-law {
+  font-family: 'Playfair Display', Georgia, serif;
+  letter-spacing: 0.01em;
 }
 
+/* ─── Focus ──────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ─── Animations ─────────────────────────────────────────── */
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
-@keyframes waveform {
-  0%, 100% { transform: scaleY(0.35); opacity: 0.6; }
-  50% { transform: scaleY(1); opacity: 1; }
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes waveform {
+  0%, 100% { transform: scaleY(0.35); opacity: 0.6; }
+  50%       { transform: scaleY(1);    opacity: 1; }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.5s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up {
+    animation: none;
+  }
+}
+
+/* ─── Voice wave (used elsewhere in app) ─────────────────── */
 .voice-wave {
   display: inline-flex;
   gap: 3px;
@@ -41,7 +97,7 @@ h1, h2, h3, .font-law {
   width: 3px;
   height: 14px;
   border-radius: 999px;
-  background: var(--court-gold);
+  background: var(--primary);
   transform-origin: center;
   animation: waveform 0.9s ease-in-out infinite;
 }
@@ -49,82 +105,50 @@ h1, h2, h3, .font-law {
 .voice-wave span:nth-child(2) { animation-delay: 0.15s; }
 .voice-wave span:nth-child(3) { animation-delay: 0.3s; }
 
-.carousel-scene {
-  perspective: 1200px;
-  transform-style: preserve-3d;
-}
+/* ─── Carousel (used elsewhere in app) ───────────────────── */
+.carousel-scene     { perspective: 1200px; transform-style: preserve-3d; }
+.carousel-track     { position: relative; transform-style: preserve-3d; transition: transform 700ms ease; }
+.carousel-card      { position: absolute; inset: 0; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform 700ms ease, opacity 700ms ease; }
+.carousel-card > div { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.carousel-card img  { image-rendering: -webkit-optimize-contrast; backface-visibility: hidden; transform: translateZ(0); }
 
-.carousel-track {
-  position: relative;
-  transform-style: preserve-3d;
-  transition: transform 700ms ease;
-}
+/* ─── Admin (used elsewhere in app) ─────────────────────── */
+.admin-shell { font-family: 'Inter', 'Roboto', sans-serif; }
 
-.carousel-card {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  transform-style: preserve-3d;
-  transition: transform 700ms ease, opacity 700ms ease;
-}
+.compliance-ring           { position: relative; width: 140px; height: 140px; }
+.compliance-ring svg       { transform: rotate(-90deg); }
+.compliance-ring .label    { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; font-size: 1.2rem; color: #1f2937; }
 
-.carousel-card > div {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-
-.carousel-card img {
-  image-rendering: -webkit-optimize-contrast;
-  backface-visibility: hidden;
-  transform: translateZ(0);
-}
-
-.admin-shell {
-  font-family: 'Inter', 'Roboto', 'Source Sans 3', sans-serif;
-}
-
-.compliance-ring {
-  position: relative;
-  width: 140px;
-  height: 140px;
-}
-
-.compliance-ring svg {
-  transform: rotate(-90deg);
-}
-
-.compliance-ring .label {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  font-size: 1.2rem;
-  color: #1f2937;
-}
-
+/* ─── Helpdesk (used elsewhere in app) ───────────────────── */
 @keyframes helpdesk-slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(18px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.helpdesk-slide-up { animation: helpdesk-slide-up 220ms ease-out; }
+
+/* ─── Legal paper (used elsewhere in app) ────────────────── */
+.legal-paper-content         { min-height: 14in; width: 100%; background: #ffffff; }
+.legal-paper-content img     { max-width: 100%; }
+
+/* ─── Landing page card hover ────────────────────────────── */
+.lp-card {
+  transition: box-shadow 200ms ease, transform 200ms ease, border-color 200ms ease;
+}
+.lp-card:hover {
+  box-shadow: 0 4px 24px rgba(15,23,42,0.10);
+  transform: translateY(-2px);
+  border-color: #BFDBFE;
 }
 
-.helpdesk-slide-up {
-  animation: helpdesk-slide-up 220ms ease-out;
+/* ─── FAQ accordion ──────────────────────────────────────── */
+.faq-answer {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 250ms ease;
 }
-
-.legal-paper-content {
-  min-height: 14in;
-  width: 100%;
-  background: #ffffff;
+.faq-answer.open {
+  grid-template-rows: 1fr;
 }
-
-.legal-paper-content img {
-  max-width: 100%;
+.faq-answer > div {
+  overflow: hidden;
 }

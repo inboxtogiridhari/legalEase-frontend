@@ -20,6 +20,7 @@ import { DocumentViewPage } from '../DocumentView/DocumentViewPage';
 import ProfilePage from '../Profile/ProfilePage';
 import { useToast } from '../Toast/ToastProvider';
 import { mapDocumentStatus, getNextAction, calculateDashboardCounts } from '../../utils/documentLifecycle';
+import { useDocumentEventListener } from '../Toast/documentEvents';
 
 const TIMELINE_STEPS = ['drafting', 'lawyer_review', 'verified', 'signed', 'sent_soft_copy', 'out_for_delivery', 'delivered'];
 
@@ -39,10 +40,10 @@ interface ClientDashboardProps {
 }
 
 export default function ClientDashboard({ serviceRoute = null }: ClientDashboardProps) {
-  const currentPath = window.location.pathname;
   const { user, profile } = useAuth();
   const { showToast, notifications } = useToast();
   const { t, i18n } = useTranslation();
+  const [routePath, setRoutePath] = useState(window.location.pathname);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const isCreationPath = Boolean(serviceRoute) || [
@@ -50,7 +51,7 @@ export default function ClientDashboard({ serviceRoute = null }: ClientDashboard
     '/dashboard/legal-notice', '/dashboard/legal-notices',
     '/dashboard/rent-agreement', '/dashboard/rent-agreements',
     '/dashboard/affidavit', '/dashboard/affidavits'
-  ].includes(currentPath);
+  ].includes(routePath);
   const [showForm, setShowForm] = useState(isCreationPath);
   const [showProfile, setShowProfile] = useState(false);
   const [search, setSearch] = useState('');
@@ -59,7 +60,7 @@ export default function ClientDashboard({ serviceRoute = null }: ClientDashboard
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [selectedType, setSelectedType] = useState<'legal_notice' | 'rent_agreement' | 'affidavit'>(
     serviceRoute ||
-    (currentPath.includes('rent') ? 'rent_agreement' : currentPath.includes('affidavit') ? 'affidavit' : 'legal_notice')
+    (routePath.includes('rent') ? 'rent_agreement' : routePath.includes('affidavit') ? 'affidavit' : 'legal_notice')
   );
   const [selectedNoticeSubtype, setSelectedNoticeSubtype] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'legal_notice' | 'rent_agreement' | 'affidavit'>(
@@ -76,6 +77,41 @@ export default function ClientDashboard({ serviceRoute = null }: ClientDashboard
   const [speakingDocId, setSpeakingDocId] = useState<string | null>(null);
   const [queryReplies, setQueryReplies] = useState<Record<string, string>>({});
   const [replyingDocId, setReplyingDocId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleRouteChange = () => {
+      const nextPath = window.location.pathname;
+      setRoutePath(nextPath);
+      const creationRoutes = [
+        '/notice-form',
+        '/rent-form',
+        '/affidavit-form',
+        '/dashboard/legal-notice',
+        '/dashboard/legal-notices',
+        '/dashboard/rent-agreement',
+        '/dashboard/rent-agreements',
+        '/dashboard/affidavit',
+        '/dashboard/affidavits',
+      ];
+      const isCreationRoute = creationRoutes.includes(nextPath);
+      if (isCreationRoute) {
+        setShowForm(true);
+        if (nextPath.includes('/dashboard/affidavit') || nextPath.includes('/affidavit-form')) {
+          setSelectedType('affidavit');
+        } else if (nextPath.includes('/dashboard/rent') || nextPath.includes('/rent-form')) {
+          setSelectedType('rent_agreement');
+        } else {
+          setSelectedType('legal_notice');
+        }
+      } else {
+        setShowForm(false);
+        setPreviewDocument(null);
+      }
+    };
+
+    window.addEventListener('popstate', handleRouteChange);
+    return () => window.removeEventListener('popstate', handleRouteChange);
+  }, []);
 
   useEffect(() => {
     if (serviceRoute) {
@@ -99,13 +135,17 @@ export default function ClientDashboard({ serviceRoute = null }: ClientDashboard
 
   useEffect(() => {
     loadDocuments();
-  }, [user]);
+  }, [user, routePath]);
+
+  useDocumentEventListener((event) => {
+    if (event.startsWith('document:')) void loadDocuments(search);
+  });
 
   useEffect(() => {
-    if (currentPath === '/refund-portal') {
+    if (routePath === '/refund-portal') {
       showToast('Refund guidance is available through support review. Share your payment issue in the help-desk panel.', 'info');
     }
-  }, [currentPath, showToast]);
+  }, [routePath, showToast]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -128,7 +168,7 @@ export default function ClientDashboard({ serviceRoute = null }: ClientDashboard
         setDocuments(data || []);
 
         // Route deep-linking support for /documents/:id, /documents/:id/edit, /documents/:id/preview, /documents/:id/tracking
-        const docMatch = currentPath.match(/^\/documents\/([a-zA-Z0-9-]+)(\/(edit|preview|tracking))?$/);
+        const docMatch = routePath.match(/^\/documents\/([a-zA-Z0-9-]+)(\/(edit|preview|tracking))?$/);
         if (docMatch && data && data.length > 0) {
           const targetId = docMatch[1];
           const action = docMatch[3];
@@ -151,6 +191,13 @@ export default function ClientDashboard({ serviceRoute = null }: ClientDashboard
     }
   }
 
+  const navigateToRoute = (to: string) => {
+    if (window.location.pathname !== to) {
+      window.history.pushState({}, '', to);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
+  };
+
   function handleCreateNew(type: 'legal_notice' | 'rent_agreement' | 'affidavit', subtype?: string) {
     setSelectedType(type);
     if (subtype) {
@@ -163,18 +210,14 @@ export default function ClientDashboard({ serviceRoute = null }: ClientDashboard
     setSkipDraftSession(true);
     setShowForm(true);
     const targetRoute = type === 'rent_agreement' ? '/dashboard/rent-agreements' : type === 'affidavit' ? '/dashboard/affidavits' : '/dashboard/legal-notices';
-    if (window.location.pathname !== targetRoute) {
-      window.history.pushState({}, '', targetRoute);
-    }
+    navigateToRoute(targetRoute);
   }
 
   function handleFormClose() {
     setShowForm(false);
     setSkipDraftSession(false);
     setActiveDraftId(undefined);
-    if (window.location.pathname !== '/dashboard') {
-      window.history.pushState({}, '', '/dashboard');
-    }
+    navigateToRoute('/dashboard');
     loadDocuments(search);
   }
 

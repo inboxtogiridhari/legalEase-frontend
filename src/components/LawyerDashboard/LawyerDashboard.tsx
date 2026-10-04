@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { FileText, Clock, CheckCircle, Eye, Wallet, Star, Banknote, UserRound, ListChecks } from 'lucide-react';
+import { FileText, Clock, CheckCircle, Eye, Wallet, Star, Banknote, UserRound, ListChecks, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiClaimDocument, apiDocumentNotifications, apiDocumentsList, apiLawyerBankSave, apiLawyerWallet, apiLawyerWithdrawRequest } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { Document } from '../../types';
@@ -7,6 +7,7 @@ import DashboardLayout from '../Layout/DashboardLayout';
 import DocumentReview from './DocumentReview';
 import ProfilePage from '../Profile/ProfilePage';
 import { useToast } from '../Toast/ToastProvider';
+import { useDocumentEventListener } from '../Toast/documentEvents';
 
 export default function LawyerDashboard() {
   const { user, profile } = useAuth();
@@ -16,6 +17,9 @@ export default function LawyerDashboard() {
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
   const [pendingUnclaimed, setPendingUnclaimed] = useState(0);
   const [filter, setFilter] = useState<'all' | 'lawyer_review' | 'verified'>('all');
+  const [queueSearch, setQueueSearch] = useState('');
+  const [queueSort, setQueueSort] = useState<'newest' | 'oldest' | 'updated'>('newest');
+  const [queuePage, setQueuePage] = useState(1);
   const [tab, setTab] = useState<'overview' | 'transactions' | 'payment' | 'profile'>('overview');
   const [wallet, setWallet] = useState<{
     balance: number;
@@ -41,6 +45,36 @@ export default function LawyerDashboard() {
     }, 20000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const openDocumentFromUrl = async () => {
+      const documentId = new URLSearchParams(window.location.search).get('document');
+      if (!documentId) return;
+      try {
+        const data = await apiDocumentsList() as Document[];
+        const target = data.find((doc) => doc.id === documentId);
+        if (!target) return;
+        if (target.assigned_lawyer_id === user?.id) {
+          setSelectedDocument(target);
+        } else {
+          setFilter('all');
+          setQueueSearch(documentId);
+        }
+      } catch (error) {
+        console.error('Could not open linked document:', error);
+      }
+    };
+    window.addEventListener('popstate', openDocumentFromUrl);
+    void openDocumentFromUrl();
+    return () => window.removeEventListener('popstate', openDocumentFromUrl);
+  }, [user?.id]);
+
+  useDocumentEventListener((event) => {
+    if (event.startsWith('document:')) {
+      void loadDocuments();
+      void loadNotifications();
+    }
+  });
 
   async function loadDocuments() {
     try {
@@ -122,11 +156,29 @@ export default function LawyerDashboard() {
   }
 
   const filteredDocuments = documents.filter((doc) => {
-    if (filter === 'all') return true;
-    if (filter === 'lawyer_review') return ['lawyer_review', 'pending_review'].includes(doc.status);
-    if (filter === 'verified') return ['verified', 'reviewed'].includes(doc.status);
-    return doc.status === filter;
+    const matchesFilter = filter === 'all'
+      || (filter === 'lawyer_review' && ['lawyer_review', 'pending_review'].includes(doc.status))
+      || (filter === 'verified' && ['verified', 'reviewed'].includes(doc.status));
+    const needle = queueSearch.trim().toLowerCase();
+    const matchesSearch = !needle || [
+      doc.id,
+      doc.document_type,
+      doc.client_profile?.full_name || '',
+      doc.client_profile?.email || '',
+    ].some((value) => value.toLowerCase().includes(needle));
+    return matchesFilter && matchesSearch;
+  }).sort((a, b) => {
+    if (queueSort === 'oldest') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    if (queueSort === 'updated') return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
+  const queuePageSize = 10;
+  const queuePages = Math.max(1, Math.ceil(filteredDocuments.length / queuePageSize));
+  const pagedDocuments = filteredDocuments.slice((queuePage - 1) * queuePageSize, queuePage * queuePageSize);
+
+  useEffect(() => {
+    setQueuePage(1);
+  }, [filter, queueSearch, queueSort]);
 
   const statusColors = {
     draft: 'bg-slate-100 text-slate-700',
@@ -160,6 +212,7 @@ export default function LawyerDashboard() {
 
   const totalVerified = documents.filter((d) => ['reviewed', 'verified'].includes(d.status)).length;
   const pendingReview = documents.filter((d) => ['pending_review', 'lawyer_review'].includes(d.status)).length;
+  const inProgress = documents.filter((d) => d.assigned_lawyer_id === user?.id && ['lawyer_review', 'pending_review'].includes(d.status)).length;
   const totalEarnings = wallet?.total_earned || 0;
   const pendingEarnings = wallet?.pending_earnings || 0;
   const availableBalance = wallet?.balance || 0;
@@ -328,15 +381,26 @@ export default function LawyerDashboard() {
           <>
             <div className="bg-white rounded-xl shadow-md p-6 grid md:grid-cols-4 gap-4">
               <div className="text-center">
-                <p className="text-3xl font-bold text-slate-900">{totalVerified}</p>
-                <p className="text-sm text-slate-600">Total Verified</p>
-              </div>
-              <div className="text-center">
-                <p className="text-3xl font-bold text-yellow-600">{pendingReview}</p>
+                <p className="text-3xl font-bold text-slate-900">{pendingReview}</p>
                 <p className="text-sm text-slate-600">Pending Reviews</p>
               </div>
               <div className="text-center">
-                <p className="text-3xl font-bold text-green-600">INR {totalEarnings}</p>
+                <p className="text-3xl font-bold text-indigo-600">{pendingUnclaimed}</p>
+                <p className="text-sm text-slate-600">New Documents</p>
+              </div>
+              <div className="text-center">
+                <p className="text-3xl font-bold text-amber-600">{inProgress}</p>
+                <p className="text-sm text-slate-600">In Progress</p>
+              </div>
+              <div className="text-center">
+                <p className="text-3xl font-bold text-green-600">{totalVerified}</p>
+                <p className="text-sm text-slate-600">Verified Documents</p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-md p-6 grid md:grid-cols-3 gap-4">
+              <div className="text-center">
+                <p className="text-2xl font-bold text-slate-900">INR {totalEarnings}</p>
                 <p className="text-sm text-slate-600">Total Earnings</p>
               </div>
               <div className="text-center flex flex-col items-center">
@@ -344,6 +408,10 @@ export default function LawyerDashboard() {
                   <Star className="w-5 h-5 text-amber-500" /> {rating.toFixed(1)}
                 </p>
                 <p className="text-sm text-slate-600">Global Rating</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-slate-900">INR {pendingEarnings}</p>
+                <p className="text-sm text-slate-600">Pending Earnings</p>
               </div>
             </div>
 
@@ -410,6 +478,28 @@ export default function LawyerDashboard() {
               </button>
             </div>
 
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <label className="relative block w-full sm:max-w-md">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={queueSearch}
+                  onChange={(event) => setQueueSearch(event.target.value)}
+                  placeholder="Search document, client, or ID"
+                  className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm"
+                />
+              </label>
+              <select
+                value={queueSort}
+                onChange={(event) => setQueueSort(event.target.value as typeof queueSort)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                aria-label="Sort documents"
+              >
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="updated">Recently updated</option>
+              </select>
+            </div>
+
             {loading ? (
               <div className="text-center py-12">
                 <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-300 border-t-slate-900"></div>
@@ -421,7 +511,7 @@ export default function LawyerDashboard() {
               </div>
             ) : (
               <div className="grid gap-4">
-                {filteredDocuments.map((doc) => {
+                {pagedDocuments.map((doc) => {
                   const StatusIcon = statusIcons[doc.status];
                   return (
                     <div
@@ -468,6 +558,27 @@ export default function LawyerDashboard() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+            {filteredDocuments.length > queuePageSize && (
+              <div className="flex items-center justify-between border-t border-slate-200 pt-4">
+                <p className="text-sm text-slate-500">Page {queuePage} of {queuePages}</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setQueuePage((page) => Math.max(1, page - 1))}
+                    disabled={queuePage === 1}
+                    className="rounded-md border border-slate-300 p-2 text-slate-700 disabled:opacity-40"
+                    aria-label="Previous page"
+                  ><ChevronLeft className="h-4 w-4" /></button>
+                  <button
+                    type="button"
+                    onClick={() => setQueuePage((page) => Math.min(queuePages, page + 1))}
+                    disabled={queuePage === queuePages}
+                    className="rounded-md border border-slate-300 p-2 text-slate-700 disabled:opacity-40"
+                    aria-label="Next page"
+                  ><ChevronRight className="h-4 w-4" /></button>
+                </div>
               </div>
             )}
           </>

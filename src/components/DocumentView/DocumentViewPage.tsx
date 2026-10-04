@@ -189,7 +189,7 @@ export function DocumentViewPage({ document, onClose, onContinueEditing, onReloa
               {isLegalNotice ? (
                 <div className="rounded-[2rem] border border-slate-200 bg-[#eef1f5] p-4 sm:p-8 print:p-0 print:border-0 print:bg-white">
                   <div className="mx-auto bg-white shadow-[0_24px_70px_rgba(15,23,42,0.12)] print:shadow-none">
-                    <LegalNoticeTemplate document={document} />
+                    <LegalNoticeTemplate document={document} structured={document.structured_draft as any} />
                   </div>
                 </div>
               ) : isHtmlDraft ? (

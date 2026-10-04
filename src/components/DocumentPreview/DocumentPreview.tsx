@@ -29,13 +29,11 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
       return;
     }
     
-    // For Legal Notices, we want to ensure the template is rendered fully before printing
     if (isLegalNotice) {
       window.print();
       return;
     }
     
-    // For other documents that might be HTML drafts
     if (isHtmlDraft) {
       window.print();
       return;
@@ -126,13 +124,11 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
     <div className="space-y-6">
       <style>{`
         @media print {
-          /* Hide browser headers/footers */
           @page {
             size: A4;
             margin: 0;
           }
           
-          /* Hide all UI elements from layout and preview */
           nav, 
           header, 
           footer, 
@@ -146,7 +142,6 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             display: none !important;
           }
 
-          /* Reset body and background */
           body, html {
             background: white !important;
             margin: 0 !important;
@@ -154,7 +149,6 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             width: 100% !important;
           }
 
-          /* Ensure the main container is clean */
           main {
             padding: 0 !important;
             margin: 0 !important;
@@ -172,7 +166,6 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             width: 100%;
           }
 
-          /* Hide preview UI elements */
           .bg-slate-900, 
           .status-badge,
           .lawyer-notes-section,
@@ -180,7 +173,6 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             display: none !important;
           }
 
-          /* Force LegalNoticeTemplate to the top */
           .legal-notice-template {
             margin-top: 0 !important;
             padding-top: 0 !important;
@@ -232,7 +224,7 @@ export default function DocumentPreview({ document, onClose }: DocumentPreviewPr
             {isLegalNotice ? (
               <div className="rounded-[2rem] border border-slate-200 bg-[#eef1f5] p-4 md:p-8 print:p-0 print:border-0 print:bg-white">
                 <div className="mx-auto bg-white shadow-[0_24px_70px_rgba(15,23,42,0.12)] print:shadow-none">
-                  <LegalNoticeTemplate document={document} />
+                  <LegalNoticeTemplate document={document} structured={document.structured_draft as any} />
                 </div>
               </div>
             ) : isHtmlDraft ? (

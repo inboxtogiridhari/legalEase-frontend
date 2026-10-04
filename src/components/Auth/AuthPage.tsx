@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Scale, ArrowLeft, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
@@ -6,6 +6,16 @@ import { apiForgotPassword, apiRequestOtp, apiResetPassword, apiVerifyOtp, setAu
 import { useToast } from '../Toast/ToastProvider';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function validatePassword(value: string, isSignup: boolean) {
+  if (!value) return 'Please enter your password.';
+  if (isSignup && value.length < 6) return 'Password must be at least 6 characters long.';
+  return '';
+}
 
 interface AuthPageProps {
   onBackToLanding?: () => void;
@@ -24,17 +34,45 @@ export default function AuthPage({ onBackToLanding, onOpenAdmin }: AuthPageProps
   const [resetToken, setResetToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string; fullName?: string; phoneNumber?: string }>({});
   const { signIn, signUp, refreshProfile } = useAuth();
+  const { showToast } = useToast();
   const { t } = useTranslation();
+
+  const otpStatusMessage = useMemo(() => {
+    if (role === 'lawyer') {
+      return 'OTP verification is not configured for this environment. Use email/password login for lawyer access.';
+    }
+    return 'OTP-based login is available when the backend provider is configured.';
+  }, [role]);
 
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const nextErrors: typeof fieldErrors = {};
+
+    if (!isValidEmail(email)) nextErrors.email = 'Please enter a valid email address.';
+    const passwordError = validatePassword(password, mode === 'signup');
+    if (passwordError) nextErrors.password = passwordError;
+    if (mode === 'signup') {
+      if (!fullName.trim()) nextErrors.fullName = 'Please enter your full name.';
+      if (phoneNumber.trim() && !/^\d{10,15}$/.test(phoneNumber.replace(/\D/g, ''))) {
+        nextErrors.phoneNumber = 'Phone number must contain 10-15 digits only.';
+      }
+    }
+
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      return;
+    }
+
     setLoading(true);
     try {
       if (mode === 'login') {
-        await signIn(email, password);
+        await signIn(email.trim(), password);
+        showToast('Signed in successfully.', 'success');
       } else {
-        await signUp(email, password, fullName, role, phoneNumber);
+        await signUp(email.trim(), password, fullName.trim(), role, phoneNumber.trim() || undefined);
+        showToast('Your account was created successfully.', 'success');
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : t('errors.generic'), 'error');
@@ -190,6 +228,9 @@ export default function AuthPage({ onBackToLanding, onOpenAdmin }: AuthPageProps
 
           {(mode === 'login' || mode === 'signup') && (
             <form onSubmit={handlePasswordSubmit} className="space-y-5">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {otpStatusMessage}
+              </div>
               {mode === 'signup' && (
                 <>
                   <Input
@@ -199,6 +240,7 @@ export default function AuthPage({ onBackToLanding, onOpenAdmin }: AuthPageProps
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder="e.g. Rahul Sharma"
                     required
+                    error={fieldErrors.fullName}
                   />
                   <Input
                     label={t('auth.phoneOptional')}
@@ -206,6 +248,7 @@ export default function AuthPage({ onBackToLanding, onOpenAdmin }: AuthPageProps
                     value={phoneNumber}
                     onChange={(e) => setPhoneNumber(e.target.value)}
                     placeholder="10-digit number"
+                    error={fieldErrors.phoneNumber}
                   />
                   <div className="space-y-1.5">
                     <label className="block text-sm font-medium text-slate-700">Account Type</label>
@@ -228,6 +271,7 @@ export default function AuthPage({ onBackToLanding, onOpenAdmin }: AuthPageProps
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 required
+                error={fieldErrors.email}
               />
               
               <div className="space-y-1.5">
@@ -249,7 +293,8 @@ export default function AuthPage({ onBackToLanding, onOpenAdmin }: AuthPageProps
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
-                  minLength={6}
+                  minLength={8}
+                  error={fieldErrors.password}
                 />
               </div>
 

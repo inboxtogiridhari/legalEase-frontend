@@ -28,13 +28,17 @@ function normalizeHtmlDocument(html: string) {
         -webkit-print-color-adjust: exact;
       }
       .legal-page {
-        width: 8.27in;
+        width: 100%;
+        max-width: 8.27in;
         min-height: 11.69in;
         margin: 0 auto;
-        padding: 1in 1in 1in 1.5in; /* 1.5in left margin for tagging/filing */
+        padding: clamp(24px, 8vw, 1in) clamp(20px, 7vw, 1in) clamp(24px, 8vw, 1in) clamp(24px, 10vw, 1.5in);
         background: white;
         position: relative;
         box-shadow: none;
+      }
+      .legal-page > div:first-child[style*="padding"] {
+        padding: clamp(20px, 5vw, 0.6in) !important;
       }
       .court-title {
         font-size: 16pt;
@@ -117,8 +121,13 @@ function normalizeHtmlDocument(html: string) {
         .legal-page {
           margin: 0;
           box-shadow: none;
-          width: 100%;
+          width: 8.27in;
+          max-width: none;
           height: auto;
+          padding: 1in 1in 1in 1.5in;
+        }
+        .legal-page > div:first-child[style*="padding"] {
+          padding: 0.6in 0.65in 0.75in 1.75in !important;
         }
         .no-print {
           display: none !important;
@@ -164,7 +173,7 @@ function normalizeHtmlDocument(html: string) {
   }
 
   // If it's already a full HTML, we wrap it in our legal-page container
-  const content = /<body[\s>](.*?)<\/body>/is.exec(source)?.[1] || source;
+  const content = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(source)?.[1] || source;
 
   return `
     <html>

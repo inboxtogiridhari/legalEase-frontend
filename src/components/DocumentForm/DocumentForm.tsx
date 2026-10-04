@@ -101,9 +101,9 @@ export default function DocumentForm({
         setSchema(result.schema);
         setFormData((prev) => {
           const next: Record<string, string> = { ...prev };
-          result.schema.steps.forEach((step) => {
-            step.fields.forEach((field) => {
-              if (next[field.key] === undefined) next[field.key] = '';
+          result.schema?.steps?.forEach((step) => {
+            step?.fields?.forEach((field) => {
+              if (next[field?.key] === undefined) next[field?.key] = '';
             });
           });
           return next;
@@ -209,7 +209,7 @@ export default function DocumentForm({
   function validateCurrentStepKeys(): string[] {
     if (!activeStep) return [];
     const keys: string[] = [];
-    activeStep.fields.forEach((field) => {
+    activeStep?.fields?.forEach((field: any) => {
       const value = formData[field.key];
       const err = validateField(field.key, field.label, value, { required: field.required, type: field.type });
       if (err) keys.push(field.key);
@@ -266,6 +266,8 @@ export default function DocumentForm({
   }
 
   async function handleSubmit() {
+    if (loading) return;
+
     let proofFilesToUpload = [...proofFiles];
     if (proofFilesToUpload.length === 0) {
       const summaryText = `Client Self-Declaration\nDocument Type: ${documentType}\nState Law: ${stateLaw}\nSubmitted At: ${new Date().toISOString()}\nDetails:\n${JSON.stringify(formData, null, 2)}`;
@@ -358,7 +360,7 @@ export default function DocumentForm({
     );
   }
 
-  if (loadingSchema) {
+  if (loadingSchema && !schema) {
     return (
       <WizardLayout>
         <div className="p-16 text-center text-slate-500">
@@ -375,217 +377,216 @@ export default function DocumentForm({
         <WizardLayout>
           <WizardHeader title={titles[documentType]} onClose={onClose}>
             {draftSessionId && (
-              <AutoSaveIndicator 
-                status={indicatorStatus} 
-                lastSavedAt={lastSavedAt || undefined} 
+              <AutoSaveIndicator
+                status={indicatorStatus}
+                lastSavedAt={lastSavedAt || undefined}
               />
             )}
           </WizardHeader>
 
-        <WizardStepper currentStep={currentStep} totalSteps={totalSteps} />
+          <WizardStepper currentStep={currentStep} totalSteps={totalSteps} />
 
-        <div className="p-8 sm:p-10">
-          <ValidationSummary missingFields={missingKeys} />
+          <div className="p-8 sm:p-10">
+            <ValidationSummary missingFields={missingKeys} />
 
-          <div className="mb-10 p-6 bg-slate-50/80 border border-slate-200 rounded-xl space-y-4 shadow-sm">
-            <div className="grid md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">{t('forms.stateLaw')}</label>
-                <input
-                  value={stateLaw}
-                  onChange={(e) => setStateLaw(e.target.value)}
-                  list="document-state-law"
-                  placeholder={t('forms.stateLawPlaceholder')}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#1a237e]/20 focus:border-[#1a237e] outline-none transition-colors shadow-sm"
-                />
-                <datalist id="document-state-law">
-                  {INDIAN_STATES.map((state) => (
-                    <option key={state} value={state} />
-                  ))}
-                </datalist>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">{t('forms.assistant')}</label>
-                <div className="flex gap-2">
+            <div className="mb-10 p-6 bg-slate-50/80 border border-slate-200 rounded-xl space-y-4 shadow-sm">
+              <div className="grid md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">{t('forms.stateLaw')}</label>
                   <input
-                    value={assistantTerm}
-                    onChange={(e) => setAssistantTerm(e.target.value)}
-                    placeholder={t('forms.assistantPlaceholder')}
-                    className="flex-1 px-4 py-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#1a237e]/20 focus:border-[#1a237e] outline-none transition-colors shadow-sm"
+                    value={stateLaw}
+                    onChange={(e) => setStateLaw(e.target.value)}
+                    list="document-state-law"
+                    placeholder={t('forms.stateLawPlaceholder')}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#1a237e]/20 focus:border-[#1a237e] outline-none transition-colors shadow-sm"
                   />
-                  <button
-                    type="button"
-                    onClick={askAssistant}
-                    disabled={assistantLoading}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors disabled:opacity-50 shadow-sm"
-                  >
-                    <Bot className="w-4 h-4" />
-                    {assistantLoading ? t('common.thinking') : t('common.ask')}
-                  </button>
+                  <datalist id="document-state-law">
+                    {INDIAN_STATES.map((state) => (
+                      <option key={state} value={state} />
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">{t('forms.assistant')}</label>
+                  <div className="flex gap-2">
+                    <input
+                      value={assistantTerm}
+                      onChange={(e) => setAssistantTerm(e.target.value)}
+                      placeholder={t('forms.assistantPlaceholder')}
+                      className="flex-1 px-4 py-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#1a237e]/20 focus:border-[#1a237e] outline-none transition-colors shadow-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={askAssistant}
+                      disabled={assistantLoading}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors disabled:opacity-50 shadow-sm"
+                    >
+                      <Bot className="w-4 h-4" />
+                      {assistantLoading ? t('common.thinking') : t('common.ask')}
+                    </button>
+                  </div>
                 </div>
               </div>
+              {assistantReply && (
+                <div className="mt-4 p-5 bg-[#1a237e]/5 border border-[#1a237e]/20 rounded-lg text-sm text-[#1a237e] whitespace-pre-wrap leading-relaxed shadow-inner">
+                  {assistantReply}
+                </div>
+              )}
             </div>
-            {assistantReply && (
-              <div className="mt-4 p-5 bg-[#1a237e]/5 border border-[#1a237e]/20 rounded-lg text-sm text-[#1a237e] whitespace-pre-wrap leading-relaxed shadow-inner">
-                {assistantReply}
+
+            {activeStep && (
+              <WizardTransition>
+                <div className="space-y-8">
+                  <div className="mb-2 border-b border-slate-100 pb-4">
+                    <h3 className="text-2xl font-bold text-slate-900">{activeStep.title}</h3>
+                    <p className="text-slate-500 mt-1">Please fill in the details accurately below.</p>
+                  </div>
+
+                  <div className="grid gap-6">
+                    {activeStep?.fields?.map((field: any) => {
+                      const value = formData[field.key] || '';
+                      const isMissing = missingKeys.includes(field.key);
+                      const baseClass = `w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 transition-all shadow-sm ${isMissing
+                        ? 'border-rose-300 bg-rose-50 focus:ring-rose-200 focus:border-rose-400'
+                        : 'bg-white border-slate-300 focus:ring-[#1a237e]/20 focus:border-[#1a237e] hover:border-slate-400'
+                        }`;
+
+                      const commonProps: {
+                        id: string;
+                        name: string;
+                        value: string;
+                        onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
+                        className: string;
+                        'aria-invalid'?: boolean;
+                        'aria-describedby'?: string;
+                      } = {
+                        id: `field-${field.key}`,
+                        name: field.key,
+                        value,
+                        onChange: (e) => updateField(field.key, e.target.value),
+                        className: baseClass,
+                        'aria-invalid': isMissing || undefined,
+                        'aria-describedby': isMissing ? `err-${field.key}` : undefined,
+                      };
+
+                      if (field.type === 'textarea') {
+                        return (
+                          <div key={field.key}>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                              {field.label} {field.required && <span className="text-rose-500">*</span>}
+                            </label>
+                            <textarea rows={4} {...commonProps} />
+                          </div>
+                        );
+                      }
+
+                      if (field.type === 'select') {
+                        return (
+                          <div key={field.key}>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                              {field.label} {field.required && <span className="text-rose-500">*</span>}
+                            </label>
+                            <select {...commonProps}>
+                              <option value="">Select an option</option>
+                              {(field?.options || []).map((opt: any) => (
+                                <option key={opt.id} value={opt.id}>{opt.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div key={field.key}>
+                          <label className="block text-sm font-semibold text-slate-700 mb-2">
+                            {field.label} {field.required && <span className="text-rose-500">*</span>}
+                          </label>
+                          <input type={field.type || 'text'} {...commonProps} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </WizardTransition>
+            )}
+            {isReviewStep && (
+              <div className="mt-6 space-y-6">
+                <div className="bg-white border border-slate-200 rounded-xl p-6">
+                  <h3 className="text-lg font-semibold text-slate-900 mb-3">Review your information</h3>
+                  <div className="text-sm text-slate-700 space-y-3">
+                    {Object.entries(formData).map(([key, value]) => (
+                      <div key={key} className="flex items-start justify-between gap-4">
+                        <div className="text-slate-600 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</div>
+                        <div className="text-slate-900 whitespace-pre-wrap text-right max-w-[60%]">{String(value)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-4 p-6 bg-slate-50 border border-slate-200 rounded-xl">
+                  <label className="block text-lg font-bold text-slate-900 mb-2">{t('forms.proofLabel')}</label>
+                  <p className="text-slate-500 mb-4">Upload supporting documents (PDF, JPG, PNG). These will be provided to your lawyer for review.</p>
+
+                  <div className="mt-1 flex justify-center px-6 pt-8 pb-10 border-2 border-slate-300 border-dashed rounded-xl bg-white hover:bg-slate-50 transition-colors shadow-inner">
+                    <div className="space-y-2 text-center">
+                      <svg className="mx-auto h-12 w-12 text-slate-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                        <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      <div className="flex text-sm text-slate-600 justify-center">
+                        <label htmlFor="file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-[#1a237e] hover:text-[#1a237e]/80 focus-within:outline-none">
+                          <span>Upload files</span>
+                          <input
+                            id="file-upload"
+                            name="file-upload"
+                            type="file"
+                            className="sr-only"
+                            multiple
+                            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif"
+                            onChange={(e) => setProofFiles(Array.from(e.target.files || []))}
+                          />
+                        </label>
+                        <p className="pl-1">or drag and drop</p>
+                      </div>
+                      <p className="text-xs text-slate-500">Up to 10MB per file</p>
+                    </div>
+                  </div>
+
+                  {proofFiles.length > 0 && (
+                    <div className="mt-6 p-4 bg-white border border-slate-200 rounded-lg shadow-sm">
+                      <p className="text-sm font-semibold text-slate-700 mb-2">{t('forms.proofSelected', { count: proofFiles.length })}</p>
+                      <ul className="text-sm text-slate-600 list-disc list-inside space-y-1">
+                        {proofFiles.map((f, i) => <li key={i}>{f.name}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
 
-          {activeStep && (
-            <WizardTransition>
-              <div className="space-y-8">
-              <div className="mb-2 border-b border-slate-100 pb-4">
-                <h3 className="text-2xl font-bold text-slate-900">{activeStep.title}</h3>
-                <p className="text-slate-500 mt-1">Please fill in the details accurately below.</p>
-              </div>
-              
-              <div className="grid gap-6">
-                {activeStep.fields.map((field) => {
-                  const value = formData[field.key] || '';
-                  const isMissing = missingKeys.includes(field.key);
-                  const baseClass = `w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 transition-all shadow-sm ${
-                    isMissing 
-                      ? 'border-rose-300 bg-rose-50 focus:ring-rose-200 focus:border-rose-400' 
-                      : 'bg-white border-slate-300 focus:ring-[#1a237e]/20 focus:border-[#1a237e] hover:border-slate-400'
-                  }`;
-                  
-                  const commonProps: {
-                    id: string;
-                    name: string;
-                    value: string;
-                    onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
-                    className: string;
-                    'aria-invalid'?: boolean;
-                    'aria-describedby'?: string;
-                  } = {
-                    id: `field-${field.key}`,
-                    name: field.key,
-                    value,
-                    onChange: (e) => updateField(field.key, e.target.value),
-                    className: baseClass,
-                    'aria-invalid': isMissing || undefined,
-                    'aria-describedby': isMissing ? `err-${field.key}` : undefined,
-                  };
-
-                  if (field.type === 'textarea') {
-                    return (
-                      <div key={field.key}>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">
-                          {field.label} {field.required && <span className="text-rose-500">*</span>}
-                        </label>
-                        <textarea rows={4} {...commonProps} />
-                      </div>
-                    );
-                  }
-
-                  if (field.type === 'select') {
-                    return (
-                      <div key={field.key}>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">
-                          {field.label} {field.required && <span className="text-rose-500">*</span>}
-                        </label>
-                        <select {...commonProps}>
-                          <option value="">Select an option</option>
-                          {(field.options || []).map((opt) => (
-                            <option key={opt.id} value={opt.id}>{opt.label}</option>
-                          ))}
-                        </select>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div key={field.key}>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">
-                        {field.label} {field.required && <span className="text-rose-500">*</span>}
-                      </label>
-                      <input type={field.type || 'text'} {...commonProps} />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            </WizardTransition>
-          )}
-          {isReviewStep && (
-            <div className="mt-6 space-y-6">
-              <div className="bg-white border border-slate-200 rounded-xl p-6">
-                <h3 className="text-lg font-semibold text-slate-900 mb-3">Review your information</h3>
-                <div className="text-sm text-slate-700 space-y-3">
-                  {Object.entries(formData).map(([key, value]) => (
-                    <div key={key} className="flex items-start justify-between gap-4">
-                      <div className="text-slate-600 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</div>
-                      <div className="text-slate-900 whitespace-pre-wrap text-right max-w-[60%]">{String(value)}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-4 p-6 bg-slate-50 border border-slate-200 rounded-xl">
-                <label className="block text-lg font-bold text-slate-900 mb-2">{t('forms.proofLabel')}</label>
-                <p className="text-slate-500 mb-4">Upload supporting documents (PDF, JPG, PNG). These will be provided to your lawyer for review.</p>
-
-                <div className="mt-1 flex justify-center px-6 pt-8 pb-10 border-2 border-slate-300 border-dashed rounded-xl bg-white hover:bg-slate-50 transition-colors shadow-inner">
-                  <div className="space-y-2 text-center">
-                    <svg className="mx-auto h-12 w-12 text-slate-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
-                      <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    <div className="flex text-sm text-slate-600 justify-center">
-                      <label htmlFor="file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-[#1a237e] hover:text-[#1a237e]/80 focus-within:outline-none">
-                        <span>Upload files</span>
-                        <input
-                          id="file-upload"
-                          name="file-upload"
-                          type="file"
-                          className="sr-only"
-                          multiple
-                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif"
-                          onChange={(e) => setProofFiles(Array.from(e.target.files || []))}
-                        />
-                      </label>
-                      <p className="pl-1">or drag and drop</p>
-                    </div>
-                    <p className="text-xs text-slate-500">Up to 10MB per file</p>
-                  </div>
-                </div>
-
-                {proofFiles.length > 0 && (
-                  <div className="mt-6 p-4 bg-white border border-slate-200 rounded-lg shadow-sm">
-                    <p className="text-sm font-semibold text-slate-700 mb-2">{t('forms.proofSelected', { count: proofFiles.length })}</p>
-                    <ul className="text-sm text-slate-600 list-disc list-inside space-y-1">
-                      {proofFiles.map((f, i) => <li key={i}>{f.name}</li>)}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <WizardFooter
-          currentStep={currentStep}
-          totalSteps={totalSteps}
-          isLoading={loading}
-          onPrevious={() => setCurrentStep(Math.max(1, currentStep - 1))}
-          onNext={() => {
-            const missingKeysHere = validateCurrentStepKeys();
-            if (missingKeysHere.length) {
-              setMissingKeys(missingKeysHere);
-              // focus first missing field
-              const first = document.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(`[name="${missingKeysHere[0]}"]`);
-              if (first) first.focus();
-              const missingLabels = (activeStep?.fields || []).filter((f) => missingKeysHere.includes(f.key)).map((f) => f.label || f.key);
-              showToast(t('forms.missingFields', { fields: missingLabels.join(', ') }), 'error');
-              return;
-            }
-            setMissingKeys([]);
-            setCurrentStep(currentStep + 1);
-          }}
-          nextLabel={currentStep + 1 === totalSteps ? 'Review' : 'Next'}
-          submitLabel={'Generate Draft'}
-          onSubmit={handleSubmit}
-        />
+          <WizardFooter
+            currentStep={currentStep}
+            totalSteps={totalSteps}
+            isLoading={loading}
+            onPrevious={() => setCurrentStep(Math.max(1, currentStep - 1))}
+            onNext={() => {
+              const missingKeysHere = validateCurrentStepKeys();
+              if (missingKeysHere.length) {
+                setMissingKeys(missingKeysHere);
+                // focus first missing field
+                const first = document.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(`[name="${missingKeysHere[0]}"]`);
+                if (first) first.focus();
+                const missingLabels = (activeStep?.fields || []).filter((f) => missingKeysHere.includes(f.key)).map((f) => f.label || f.key);
+                showToast(t('forms.missingFields', { fields: missingLabels.join(', ') }), 'error');
+                return;
+              }
+              setMissingKeys([]);
+              setCurrentStep(currentStep + 1);
+            }}
+            nextLabel={currentStep + 1 === totalSteps ? 'Review' : 'Next'}
+            submitLabel={'Generate Draft'}
+            onSubmit={handleSubmit}
+          />
         </WizardLayout>
       </WizardProvider>
 

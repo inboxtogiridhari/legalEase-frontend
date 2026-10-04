@@ -37,7 +37,7 @@ function hashObject(obj: unknown, depth = 0): number {
 export function useAutoSave<T = unknown>(payload: T, saveFn: SaveFn<T>, delay = 1000) {
   const timer = useRef<number | null>(null);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const lastSavedAt = useRef<string | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const lastHash = useRef<number | null>(null);
   const saveFnRef = useRef(saveFn);
 
@@ -57,7 +57,7 @@ export function useAutoSave<T = unknown>(payload: T, saveFn: SaveFn<T>, delay = 
       try {
         await saveFnRef.current(payload);
         setStatus('saved');
-        lastSavedAt.current = new Date().toISOString();
+        setLastSavedAt(new Date().toISOString());
       } catch (error) {
         console.error('autosave failed', error);
         setStatus('error');
@@ -69,5 +69,5 @@ export function useAutoSave<T = unknown>(payload: T, saveFn: SaveFn<T>, delay = 
     };
   }, [delay, payload]);
 
-  return { status, lastSavedAt: lastSavedAt.current };
+  return { status, lastSavedAt };
 }

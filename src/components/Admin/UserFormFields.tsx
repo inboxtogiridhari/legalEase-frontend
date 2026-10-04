@@ -10,6 +10,17 @@ interface Props {
 
 export default function UserFormFields({ form, files, setForm, setFiles, mode }: Props) {
   const isLawyer = form.role === 'lawyer';
+  const uploadBase = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
+
+  function currentUpload(url: string, label: string) {
+    if (!url) return null;
+    const href = /^https?:\/\//i.test(url) ? url : `${uploadBase}${url.startsWith('/') ? '' : '/'}${url}`;
+    return (
+      <a href={href} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-xs font-medium text-indigo-700 hover:underline">
+        Open current {label}
+      </a>
+    );
+  }
 
   function update<K extends keyof UserFormData>(key: K, value: UserFormData[K]) {
     setForm({ ...form, [key]: value });
@@ -61,14 +72,19 @@ export default function UserFormFields({ form, files, setForm, setFiles, mode }:
 
       <div className="grid md:grid-cols-2 gap-3">
         <div>
-          <label className="text-xs text-slate-600">Profile photo file</label>
+          <label className="text-xs text-slate-600">Profile photo {mode === 'edit' ? '(choose replacement)' : 'file'}</label>
           <input type="file" accept=".jpg,.jpeg,.png" className="w-full px-3 py-2 border rounded-lg" onChange={(e) => updateFile('profile_photo', e.target.files?.[0] || null)} />
-          {form.profile_photo_url && <p className="text-xs text-slate-500 mt-1">Current: {form.profile_photo_url}</p>}
+          {files.profile_photo && <p className="mt-1 text-xs text-emerald-700">Selected: {files.profile_photo.name}</p>}
+          {form.profile_photo_url && <div className="mt-2 flex items-center gap-2">
+            <img src={/^https?:\/\//i.test(form.profile_photo_url) ? form.profile_photo_url : `${uploadBase}${form.profile_photo_url.startsWith('/') ? '' : '/'}${form.profile_photo_url}`} alt="Current profile" className="h-10 w-10 rounded-full border object-cover" />
+            {currentUpload(form.profile_photo_url, 'profile photo')}
+          </div>}
         </div>
         <div>
-          <label className="text-xs text-slate-600">Identity proof file</label>
+          <label className="text-xs text-slate-600">Identity proof {mode === 'edit' ? '(choose replacement)' : 'file'}</label>
           <input type="file" accept=".jpg,.jpeg,.png,.pdf,.doc,.docx" className="w-full px-3 py-2 border rounded-lg" onChange={(e) => updateFile('identity_proof', e.target.files?.[0] || null)} />
-          {form.identity_proof_url && <p className="text-xs text-slate-500 mt-1">Current: {form.identity_proof_url}</p>}
+          {files.identity_proof && <p className="mt-1 text-xs text-emerald-700">Selected: {files.identity_proof.name}</p>}
+          {currentUpload(form.identity_proof_url, 'identity proof')}
         </div>
       </div>
 
@@ -85,14 +101,16 @@ export default function UserFormFields({ form, files, setForm, setFiles, mode }:
           <textarea value={form.office_address} onChange={(e) => update('office_address', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="Office Address" />
           <div className="grid md:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-slate-600">Signature file (image)</label>
+              <label className="text-xs text-slate-600">Signature {mode === 'edit' ? '(choose replacement)' : 'file (image)'}</label>
               <input type="file" accept=".jpg,.jpeg,.png" className="w-full px-3 py-2 border rounded-lg" onChange={(e) => updateFile('signature', e.target.files?.[0] || null)} />
-              {form.signature_url && <p className="text-xs text-slate-500 mt-1">Current: {form.signature_url}</p>}
+              {files.signature && <p className="mt-1 text-xs text-emerald-700">Selected: {files.signature.name}</p>}
+              {currentUpload(form.signature_url, 'signature')}
             </div>
             <div>
-              <label className="text-xs text-slate-600">Bar certificate file</label>
+              <label className="text-xs text-slate-600">Bar certificate {mode === 'edit' ? '(choose replacement)' : 'file'}</label>
               <input type="file" accept=".jpg,.jpeg,.png,.pdf,.doc,.docx" className="w-full px-3 py-2 border rounded-lg" onChange={(e) => updateFile('bar_certificate', e.target.files?.[0] || null)} />
-              {form.bar_certificate_url && <p className="text-xs text-slate-500 mt-1">Current: {form.bar_certificate_url}</p>}
+              {files.bar_certificate && <p className="mt-1 text-xs text-emerald-700">Selected: {files.bar_certificate.name}</p>}
+              {currentUpload(form.bar_certificate_url, 'bar certificate')}
             </div>
           </div>
           <select value={form.verification_status} onChange={(e) => update('verification_status', e.target.value as UserFormData['verification_status'])} className="px-3 py-2 border rounded-lg w-full">

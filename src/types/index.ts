@@ -6,6 +6,11 @@ export interface Profile {
   phone_number?: string | null;
   phone_verified?: boolean;
   address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  date_of_birth?: string | null;
+  gender?: string | null;
   government_id_type?: 'aadhaar' | 'pan' | 'passport' | 'driving_license' | 'voter_id' | null;
   government_id_number?: string | null;
   government_id_status?: 'unsubmitted' | 'pending' | 'verified' | 'rejected';
@@ -18,7 +23,17 @@ export interface Profile {
   signature_url?: string | null;
   bar_certificate_url?: string | null;
   identity_proof_url?: string | null;
-  verification_status?: 'unsubmitted' | 'pending' | 'verified' | 'rejected';
+  professional_bio?: string | null;
+  practice_areas?: string | null;
+  courts?: string | null;
+  bar_association?: string | null;
+  enrollment_number?: string | null;
+  enrollment_year?: number | null;
+  enrollment_date?: string | null;
+  verification_status?: 'unsubmitted' | 'pending' | 'verified' | 'rejected' | 'format_valid' | 'submitted' | 'document_review_pending' | 'official_verification_pending';
+  verification_source?: string | null;
+  verified_at?: string | null;
+  verification_reason?: string | null;
   bank_account_number?: string | null;
   bank_ifsc?: string | null;
   bank_upi_id?: string | null;
@@ -140,13 +155,15 @@ export interface Document {
   delivery_meta?: {
     soft_copy?: Record<string, unknown>;
     hard_copy?: Record<string, unknown>;
-    notifications?: Record<string, { sent?: boolean; mocked?: boolean; reason?: string; at?: string }>;
+    notifications?: Record<string, { sent?: boolean; mocked?: boolean; reason?: boolean; at?: string }>;
   };
   esign_status?: 'not_requested' | 'requested' | 'sent' | 'signed' | 'failed';
   esign_provider?: string | null;
   esign_request_id?: string | null;
   signed_at?: string | null;
   state_law?: string | null;
+  structured_draft?: Record<string, unknown>;
+  document_meta?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -155,18 +172,84 @@ export interface LegalNoticeData {
   noticeType: string;
   senderName: string;
   senderAddress: string;
+  senderPhone?: string;
+  senderEmail?: string;
   recipientName: string;
   recipientAddress: string;
+  recipientPhone?: string;
+  recipientEmail?: string;
   subject: string;
   description: string;
   demands: string;
   timeline: string;
-  amount?: string;
+  // Cheque bounce
+  chequeNumber?: string;
+  chequeDate?: string;
+  chequeAmount?: string;
+  bankName?: string;
+  branch?: string;
+  presentationDate?: string;
+  dishonourDate?: string;
+  dishonourReason?: string;
+  returnMemoDate?: string;
+  underlyingLiability?: string;
+  demandAmount?: string;
+  // Tenant eviction
+  landlordName?: string;
+  tenantName?: string;
+  propertyAddress?: string;
+  tenancyAgreementDate?: string;
+  rentAmount?: string;
+  securityDeposit?: string;
+  arrears?: string;
+  evictionGround?: string;
+  previousNoticeDetails?: string;
+  requiredPossessionDate?: string;
+  // Money recovery
+  transactionDate?: string;
+  transactionType?: string;
+  invoiceNumber?: string;
+  principalAmount?: string;
+  interestRate?: string;
+  totalOutstanding?: string;
   dueDate?: string;
-  transactionId?: string;
+  remindersMade?: string;
+  paymentHistory?: string;
+  // Divorce / family
+  spouseName?: string;
   marriageDate?: string;
-  lastCohabitationDate?: string;
-  grounds?: string;
+  marriagePlace?: string;
+  matrimonialResidence?: string;
+  childrenDetails?: string;
+  priorResolutionAttempts?: string;
+  requestedAction?: string;
+  // Employment
+  employeeName?: string;
+  employerName?: string;
+  designation?: string;
+  employerAddress?: string;
+  employmentStartDate?: string;
+  disputeType?: string;
+  salaryDues?: string;
+  dueFromDate?: string;
+  dueToDate?: string;
+  terminationDate?: string;
+  terminationReason?: string;
+  noticePeriod?: string;
+  deductionAmount?: string;
+  deductionDate?: string;
+  gratuityAmount?: string;
+  yearsOfService?: string;
+  lastWorkingDay?: string;
+  letterRequestedDate?: string;
+  otherDescription?: string;
+  // Common
+  hasWitnesses?: string;
+  legalProvisions?: string;
+  consequences?: string;
+  closing?: string;
+  witness1?: string;
+  witness2?: string;
 }
 
 export interface RentAgreementData {

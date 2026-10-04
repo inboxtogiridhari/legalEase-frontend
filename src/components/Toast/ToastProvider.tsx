@@ -1,10 +1,11 @@
 import { createContext, ReactNode, startTransition, useContext, useEffect, useRef, useState } from 'react';
-import { Bell, CheckCheck, ExternalLink, X } from 'lucide-react';
+import { CheckCheck, ExternalLink, X } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import { AppNotification } from '../../types';
 import { apiNotificationRead, apiNotificationsClearAll, apiNotificationsList, getAuthToken } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { publishDocumentEvent } from './documentEvents';
 
 type ToastType = 'success' | 'error' | 'info';
 
@@ -93,6 +94,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       });
     });
 
+    [
+      'document:created',
+      'document:assigned',
+      'document:claimed',
+      'document:updated',
+      'document:verified',
+      'document:revision_requested',
+      'document:client_responded',
+      'lawyer:verification_updated',
+    ].forEach((event) => {
+      socket.on(event, (payload: Record<string, unknown>) => publishDocumentEvent(event, payload));
+    });
+
     return () => {
       socket.disconnect();
       if (socketRef.current === socket) socketRef.current = null;
@@ -113,16 +127,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }
 
   async function markAsRead(id: string) {
+    const notification = notifications.find((item) => item.id === id);
     await apiNotificationRead(id);
-    setNotifications((prev) => prev.filter((item) => item.id !== id));
-    setUnread((prev) => Math.max(0, prev - 1));
+    setNotifications((prev) => prev.map((item) => item.id === id
+      ? { ...item, status: 'read', read_at: item.read_at || new Date().toISOString() }
+      : item));
+    if (notification?.status !== 'read') setUnread((prev) => Math.max(0, prev - 1));
   }
 
   async function clearAll() {
     setClearingAll(true);
     try {
       await apiNotificationsClearAll();
-      setNotifications([]);
+      const readAt = new Date().toISOString();
+      setNotifications((prev) => prev.map((item) => ({ ...item, status: 'read', read_at: item.read_at || readAt })));
       setUnread(0);
     } finally {
       setClearingAll(false);
@@ -157,7 +175,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 disabled={notifications.length === 0 || clearingAll}
                 className="rounded-full px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-40"
               >
-                {clearingAll ? 'Clearing...' : 'Clear All'}
+                {clearingAll ? 'Updating...' : 'Mark all read'}
               </button>
               <button type="button" onClick={() => setPanelOpen(false)} className="rounded-full p-1 text-slate-500 hover:bg-slate-100">
                 <X className="h-4 w-4" />
@@ -190,7 +208,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   {item.deep_link_url && (
                     <a
                       href={item.deep_link_url}
-                      onClick={() => void markAsRead(item.id)}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        const target = new URL(item.deep_link_url as string, window.location.origin);
+                        if (target.origin === window.location.origin) {
+                          window.history.pushState({}, '', `${target.pathname}${target.search}${target.hash}`);
+                          window.dispatchEvent(new PopStateEvent('popstate'));
+                        } else {
+                          window.location.assign(target.toString());
+                        }
+                        void markAsRead(item.id);
+                        setPanelOpen(false);
+                      }}
                       className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-indigo-700"
                     >
                       Open tracking

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { io } from 'socket.io-client';
 import {
   AdminStats,
   AdminUserUpsertPayload,
@@ -45,6 +46,7 @@ import {
 } from 'recharts';
 
 type AdminScreen = 'login' | 'overview' | 'lawyers' | 'clients' | 'audit' | 'view';
+const SOCKET_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
 
 interface AdminPanelProps {
   onBack: () => void;
@@ -163,6 +165,7 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [adminToken, setAdminToken] = useState('');
+  const [adminSocketToken, setAdminSocketToken] = useState('');
 
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [events, setEvents] = useState<LoginEvent[]>([]);
@@ -193,6 +196,7 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
 
   const [bellOpen, setBellOpen] = useState(false);
   const [docNotifications, setDocNotifications] = useState<{ pending_unclaimed: number } | null>(null);
+  const refreshAdminSocketRef = useRef<() => void>(() => undefined);
 
   const roleContext: AdminRole = screen === 'lawyers' ? 'lawyer' : 'client';
 
@@ -200,6 +204,7 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
     try {
       const data = await apiAdminLogin({ email: adminEmail, password: adminPassword });
       setAdminToken(data.admin_token);
+      setAdminSocketToken(data.session_token);
       setScreen('overview');
       showToast('Admin login successful', 'success');
     } catch (e) {
@@ -260,6 +265,20 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
       setDocNotifications({ pending_unclaimed: 0 });
     }
   }
+
+  refreshAdminSocketRef.current = () => {
+    void loadNotifications();
+    if (screen === 'overview') void loadStats();
+    if (screen === 'lawyers') void loadUsers('lawyer');
+    if (screen === 'clients') void loadUsers('client');
+    if (screen === 'audit') void loadAudit();
+    if (screen === 'view' && detailUser) {
+      void apiAdminUserDetail(adminToken, detailUser.id).then((data) => {
+        setDetailUser(data.user);
+        setDetailDocs((data.documents as AdminDoc[]) || []);
+      }).catch((error) => console.error('Admin realtime refresh failed:', error));
+    }
+  };
 
   async function openView(id: string, mode: VerifyMode = 'view') {
     try {
@@ -396,6 +415,17 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
     if (!adminToken || screen === 'login') return;
     loadNotifications();
   }, [adminToken, screen]);
+
+  useEffect(() => {
+    if (!adminSocketToken || screen === 'login') return;
+    const socket = io(SOCKET_BASE, {
+      transports: ['websocket'],
+      auth: { token: adminSocketToken },
+    });
+    ['document:created', 'document:assigned', 'document:updated', 'document:verified', 'document:revision_requested', 'lawyer:verification_updated']
+      .forEach((event) => socket.on(event, () => refreshAdminSocketRef.current()));
+    return () => socket.disconnect();
+  }, [adminSocketToken, screen]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -692,7 +722,7 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
                     <div className="flex-1">
                       <p className="font-medium text-slate-900">{e.role} logged in via {e.login_method}</p>
                       <p className="text-sm text-slate-500">{new Date(e.created_at).toLocaleString()}</p>
-                      <p className="text-sm text-slate-600">Email: {e.email || '-'} · Phone: {e.phone_number || '-'} · OTP: {e.otp_code || '-'}</p>
+                      <p className="text-sm text-slate-600">Email: {e.email || '-'} ï¿½ Phone: {e.phone_number || '-'} ï¿½ OTP: {e.otp_code || '-'}</p>
                     </div>
                   </div>
                 ))}

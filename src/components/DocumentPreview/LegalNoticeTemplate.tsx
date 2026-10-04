@@ -1,72 +1,57 @@
 import React, { useMemo } from 'react';
-import { Document, LegalNoticeData } from '../../types';
+import { Document } from '../../types';
+import { StructuredLegalNoticeDocument } from '../../types/structuredDocument';
+import LegalNoticeRenderer from './LegalNoticeRenderer';
 
 interface LegalNoticeTemplateProps {
   document: Document;
+  structured?: StructuredLegalNoticeDocument;
 }
 
-/**
- * Safe mapping function to handle missing fields with placeholders.
- */
-const safeMap = (value: any) => {
-  const trimmed = String(value || '').trim();
-  return trimmed !== '' ? trimmed : '[________________]';
-};
+export default function LegalNoticeTemplate({ document, structured }: LegalNoticeTemplateProps) {
+  const resolvedStructured = useMemo(() => {
+    if (structured) return structured;
+    const raw = document.structured_draft as Partial<StructuredLegalNoticeDocument> | undefined;
+    if (raw && raw.noticeType && raw.advocate) return raw as StructuredLegalNoticeDocument;
+    return undefined;
+  }, [document, structured]);
 
-export default function LegalNoticeTemplate({ document }: LegalNoticeTemplateProps) {
-  const formData = document.form_data as LegalNoticeData;
-  
-  const mappedData = useMemo(() => {
-    const noticeType = formData.noticeType || 'General Legal Notice';
-    
-    // Determine dynamic preamble/header based on noticeType
-    let dynamicHeader = 'LEGAL NOTICE';
-    let preamblePrefix = `Under instructions from and on behalf of my client ${safeMap(formData.senderName)}, I hereby serve you with the following legal notice:`;
+  if (resolvedStructured) {
+    return <LegalNoticeRenderer document={document} structured={resolvedStructured} />;
+  }
 
-    if (noticeType.toLowerCase().includes('cheque bounce')) {
-      dynamicHeader = 'NOTICE UNDER SECTION 138 OF THE NEGOTIABLE INSTRUMENTS ACT, 1881';
-    } else if (noticeType.toLowerCase().includes('money recovery')) {
-      dynamicHeader = 'LEGAL NOTICE FOR RECOVERY OF MONEY';
-    } else if (noticeType.toLowerCase().includes('tenant eviction')) {
-      dynamicHeader = 'LEGAL NOTICE FOR EVICTION AND ARREARS OF RENT';
-    }
+  const formData = document.form_data as any;
+  const noticeType = formData?.noticeType || 'General Legal Notice';
+  const safeMap = (value: any) => {
+    const trimmed = String(value || '').trim();
+    return trimmed !== '' ? trimmed : '[________________]';
+  };
 
-    // Smart Placeholders
-    const clientStory = safeMap(formData.description);
-    const legalDemand = safeMap(formData.demands);
-    const timeline = safeMap(formData.timeline || '15 days');
-    
-    // Interest Clause for Money/Cheque cases
-    let interestClause = '';
-    if (noticeType.toLowerCase().includes('money') || noticeType.toLowerCase().includes('cheque')) {
-      const amount = formData.amount ? `₹${formData.amount}` : '[Amount]';
-      interestClause = `My client further demands interest @ 18% per annum on the said amount of ${amount} from the date it became due until actual realization.`;
-    }
+  const dynamicHeader = noticeType.toLowerCase().includes('cheque bounce')
+    ? 'NOTICE UNDER SECTION 138 OF THE NEGOTIABLE INSTRUMENTS ACT, 1881'
+    : noticeType.toLowerCase().includes('money recovery')
+      ? 'LEGAL NOTICE FOR RECOVERY OF MONEY'
+      : noticeType.toLowerCase().includes('tenant eviction')
+        ? 'LEGAL NOTICE FOR EVICTION AND ARREARS OF RENT'
+        : 'LEGAL NOTICE';
 
-    return {
-      noticeDate: document.created_at 
-        ? new Date(document.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })
-        : new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }),
-      place: safeMap(formData.senderAddress?.split(',').pop() || 'On Record'),
-      recipientName: safeMap(formData.recipientName),
-      recipientAddress: safeMap(formData.recipientAddress),
-      subject: safeMap(formData.subject),
-      clientName: safeMap(formData.senderName),
-      dynamicHeader,
-      preamblePrefix,
-      clientStory,
-      legalDemand,
-      timeline,
-      interestClause,
-      lawyerName: safeMap(document.reviewed_by_name || 'Advocate on Record'),
-      witness1: safeMap(formData.witness1 || '[Witness 1 Name]'),
-      witness2: safeMap(formData.witness2 || '[Witness 2 Name]'),
-    };
-  }, [document, formData]);
+  const clientStory = safeMap(formData?.description);
+  const legalDemand = safeMap(formData?.demands);
+  const timeline = safeMap(formData?.timeline || '15 days');
 
-  // Split facts and demands into numbered paragraphs if they aren't already
+  let interestClause = '';
+  if (noticeType.toLowerCase().includes('money') || noticeType.toLowerCase().includes('cheque')) {
+    const amount = formData?.amount ? `Rs. ${formData.amount}` : '[Amount]';
+    interestClause = `My client further demands interest @ 18% per annum on the said amount of ${amount} from the date it became due until actual realization.`;
+  }
+
+  const noticeDate = document.created_at
+    ? new Date(document.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })
+    : new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+  const place = safeMap(formData?.senderAddress?.split(',').pop() || 'On Record');
+
   const renderNumberedParas = (text: string, startNum = 1) => {
-    const lines = text.split('\n').filter(l => l.trim() !== '');
+    const lines = text.split('\n').filter((l) => l.trim() !== '');
     return lines.map((line, index) => (
       <div key={index} className="numbered-para">
         <div className="para-num">{startNum + index}.</div>
@@ -76,10 +61,8 @@ export default function LegalNoticeTemplate({ document }: LegalNoticeTemplatePro
   };
 
   return (
-    <div className="legal-notice-template font-serif text-[12pt] leading-[1.5] text-black bg-white p-[1in_1in_1in_1.5in] max-w-[8.27in] mx-auto shadow-none print:p-0 print:w-full">
+    <div className="legal-notice-template font-serif text-[12pt] leading-[1.5] text-black bg-white p-[1in_1in_1in_1.5in] max-w-[8.27in] mx-auto">
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Tinos:ital,wght@0,400;0,700;1,400;1,700&display=swap');
-        
         .legal-notice-template {
           font-family: "Times New Roman", "Tinos", Times, serif !important;
           text-align: justify;
@@ -161,7 +144,6 @@ export default function LegalNoticeTemplate({ document }: LegalNoticeTemplatePro
           gap: 50pt;
           margin-top: 20pt;
         }
-        
         @media print {
           @page {
             size: A4;
@@ -184,40 +166,40 @@ export default function LegalNoticeTemplate({ document }: LegalNoticeTemplatePro
       `}</style>
 
       <div className="header-section">
-        <div>Place: {mappedData.place}</div>
-        <div>Date: {mappedData.noticeDate}</div>
+        <div>Place: {place}</div>
+        <div>Date: {noticeDate}</div>
       </div>
 
-      <div className="court-title">{mappedData.dynamicHeader}</div>
+      <div className="court-title">{dynamicHeader}</div>
 
       <div className="address-block">
         To,<br />
-        <strong>{mappedData.recipientName}</strong><br />
-        {mappedData.recipientAddress}
+        <strong>{safeMap(formData?.recipientName)}</strong><br />
+        {safeMap(formData?.recipientAddress)}
       </div>
 
       <div className="subject-line">
-        RE: {mappedData.subject}
+        RE: {safeMap(formData?.subject)}
       </div>
 
       <div className="preamble">
-        {mappedData.preamblePrefix}
+        Under instructions from and on behalf of my client {safeMap(formData?.senderName)}, I hereby serve you with the following legal notice:
       </div>
 
       <div className="body-paragraphs">
-        {renderNumberedParas(mappedData.clientStory)}
-        {mappedData.interestClause && (
+        {renderNumberedParas(clientStory)}
+        {interestClause && (
           <div className="numbered-para">
-            <div className="para-num">{mappedData.clientStory.split('\n').filter(l => l.trim() !== '').length + 1}.</div>
-            <div className="para-content font-bold">{mappedData.interestClause}</div>
+            <div className="para-num">{clientStory.split('\n').filter((l) => l.trim() !== '').length + 1}.</div>
+            <div className="para-content font-bold">{interestClause}</div>
           </div>
         )}
       </div>
 
       <div className="demands-section mt-8">
         <p className="font-bold underline mb-4">LEGAL DEMAND:</p>
-        <p className="mb-4">In view of the above facts, my client hereby demands that you comply with the following within <strong>{mappedData.timeline}</strong> of the receipt of this notice:</p>
-        {renderNumberedParas(mappedData.legalDemand)}
+        <p className="mb-4">In view of the above facts, my client hereby demands that you comply with the following within <strong>{timeline}</strong> of the receipt of this notice:</p>
+        {renderNumberedParas(legalDemand)}
       </div>
 
       <div className="footer-section">
@@ -229,7 +211,7 @@ export default function LegalNoticeTemplate({ document }: LegalNoticeTemplatePro
           <div className="sig-box">
             <div className="sig-line">
               (Signature)<br />
-              {mappedData.clientName}<br />
+              {safeMap(formData?.senderName)}<br />
               Client
             </div>
           </div>
@@ -244,7 +226,7 @@ export default function LegalNoticeTemplate({ document }: LegalNoticeTemplatePro
             )}
             <div className="sig-line">
               (Advocate Signature)<br />
-              {mappedData.lawyerName}<br />
+              {safeMap(document.reviewed_by_name || 'Advocate on Record')}<br />
               Advocate
             </div>
           </div>
@@ -254,12 +236,12 @@ export default function LegalNoticeTemplate({ document }: LegalNoticeTemplatePro
           <p className="font-bold underline text-center mb-6">WITNESSES</p>
           <div className="witness-grid">
             <div>
-              1. {mappedData.witness1}<br />
+              1. {safeMap(formData?.witness1 || '[Witness 1 Name]')}<br />
               _______________________<br />
               (Signature)
             </div>
             <div>
-              2. {mappedData.witness2}<br />
+              2. {safeMap(formData?.witness2 || '[Witness 2 Name]')}<br />
               _______________________<br />
               (Signature)
             </div>
